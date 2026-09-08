@@ -1,0 +1,14 @@
+schema: 1
+
+runtimeConnections:
+  local:
+    kind: docker
+    context: desktop-linux
+    socket: ./sockets/docker.sock
+  remote:
+    kind: podman
+    context: podman-machine-default
+
+preferences:
+  output: yaml
+  color: false

@@ -1,0 +1,10 @@
+schema: 1
+
+project:
+  addons:
+    core:
+      path: ../local-core
+
+environments:
+  dev:
+    runtimeConnection: remote

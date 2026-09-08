@@ -1,0 +1,36 @@
+schema: 1
+
+project:
+  name: demo
+  odooVersion: "18.0"
+  runtimeConnection: local
+  pythonPackages:
+    - requests
+    - pandas
+  addons:
+    core:
+      path: ./addons/core
+    extra:
+      path: ./addons/extra
+      enabled: false
+  odoo:
+    masterPassword:
+      env: ODOOBOAT_MASTER_PASSWORD
+    options:
+      workers: "2"
+      limit_time_cpu: "120"
+
+environments:
+  dev:
+    odooVersion: "17.0"
+    pythonPackages:
+      - requests
+    addons:
+      extra:
+        enabled: true
+    odoo:
+      options:
+        workers: "0"
+  ci:
+    runtimeConnection: remote
+    pythonPackages: []
