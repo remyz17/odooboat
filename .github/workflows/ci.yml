@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go test -race ./...
+      - run: go vet ./...
+      - name: Check dependency direction
+        shell: bash
+        run: |
+          cli_imports="$(go list -f '{{join .Imports "\n"}}' ./internal/cli)"
+          if grep -Eq 'internal/(workspace|state)' <<<"$cli_imports"; then
+            echo "CLI must depend on workspace state only through internal/app"
+            exit 1
+          fi
+          if grep -R --include='*.go' -n 'github.com/spf13/cobra' internal/app internal/config internal/workspace internal/state; then
+            echo "Cobra must remain inside internal/cli"
+            exit 1
+          fi
