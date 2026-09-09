@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 
 	"github.com/remyz17/odooboat/internal/app"
 	"github.com/remyz17/odooboat/internal/config"
@@ -21,6 +20,7 @@ const (
 	ExitError  = 1
 	ExitUsage  = 2
 	ExitConfig = 3
+	ExitState  = 4
 )
 
 // ErrUsage marks a failure of CLI syntax, the only class that prints usage text.
@@ -40,6 +40,7 @@ func usageErrorf(cmd *cobra.Command, format string, args ...any) error {
 
 type Dependencies struct {
 	Config     app.ConfigService
+	Workspace  app.WorkspaceService
 	Stdin      io.Reader
 	Stdout     io.Writer
 	Stderr     io.Writer
@@ -93,31 +94,21 @@ func NewRootCommand(deps Dependencies) *cobra.Command {
 
 	root.AddCommand(newConfigCommand(deps, global))
 	root.AddCommand(newInitCommand(deps, global))
+	root.AddCommand(newWorkspaceCommand(deps, global))
+	root.AddCommand(newEnvironmentCommand(deps, global))
 	return root
 }
 
-func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	workingDir, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintln(stderr, "odooboat:", err)
-		return ExitError
-	}
-
-	root := NewRootCommand(Dependencies{
-		Config:     app.NewConfigService(),
-		Stdin:      stdin,
-		Stdout:     stdout,
-		Stderr:     stderr,
-		WorkingDir: workingDir,
-	})
+func Run(ctx context.Context, args []string, deps Dependencies) int {
+	root := NewRootCommand(deps)
 	root.SetArgs(args)
 
 	if err := root.ExecuteContext(ctx); err != nil {
 		var usage *UsageError
 		if errors.As(err, &usage) && usage.Cmd != nil {
-			fmt.Fprint(stderr, usage.Cmd.UsageString())
+			fmt.Fprint(deps.Stderr, usage.Cmd.UsageString())
 		}
-		fmt.Fprintln(stderr, "odooboat:", err)
+		fmt.Fprintln(deps.Stderr, "odooboat:", err)
 		return ExitCode(err)
 	}
 	return ExitOK
@@ -134,6 +125,8 @@ func ExitCode(err error) int {
 		errors.Is(err, config.ErrAuthored),
 		errors.Is(err, config.ErrResolved):
 		return ExitConfig
+	case errors.Is(err, app.ErrState):
+		return ExitState
 	default:
 		return ExitError
 	}
