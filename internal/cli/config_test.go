@@ -10,6 +10,7 @@ import (
 
 	"github.com/remyz17/odooboat/internal/app"
 	"github.com/remyz17/odooboat/internal/config"
+	statefile "github.com/remyz17/odooboat/internal/state/file"
 	"github.com/spf13/cobra"
 )
 
@@ -33,6 +34,7 @@ func execute(t *testing.T, workingDir string, args ...string) run {
 	var stdout, stderr bytes.Buffer
 	root := NewRootCommand(Dependencies{
 		Config:     app.NewConfigService(),
+		Workspace:  app.NewWorkspaceService(statefile.New()),
 		Stdin:      strings.NewReader(""),
 		Stdout:     &stdout,
 		Stderr:     &stderr,
@@ -202,7 +204,7 @@ func TestExitCodes(t *testing.T) {
 
 func TestConfigurationErrorsDoNotPrintUsage(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := Run(context.Background(), fixtureArgs(t, "config", "validate", "--project", filepath.Join(t.TempDir(), "nope.yaml")), strings.NewReader(""), &stdout, &stderr)
+	code := Run(context.Background(), fixtureArgs(t, "config", "validate", "--project", filepath.Join(t.TempDir(), "nope.yaml")), Dependencies{Config: app.NewConfigService(), Workspace: app.NewWorkspaceService(statefile.New()), Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr, WorkingDir: t.TempDir()})
 	if code != ExitConfig {
 		t.Errorf("exit code = %d, want %d", code, ExitConfig)
 	}
@@ -213,7 +215,7 @@ func TestConfigurationErrorsDoNotPrintUsage(t *testing.T) {
 
 func TestUsageErrorsPrintUsage(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := Run(context.Background(), []string{"bogus"}, strings.NewReader(""), &stdout, &stderr)
+	code := Run(context.Background(), []string{"bogus"}, Dependencies{Config: app.NewConfigService(), Workspace: app.NewWorkspaceService(statefile.New()), Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr, WorkingDir: t.TempDir()})
 	if code != ExitUsage {
 		t.Errorf("exit code = %d, want %d", code, ExitUsage)
 	}
