@@ -30,7 +30,7 @@ func resolveDocuments(t *testing.T, project, user string) (Result, error) {
 	return Resolve(Options{WorkingDir: dir, ProjectPath: projectPath, UserConfigPath: userPath})
 }
 
-const validUserDocument = "schema: 1\nruntimeConnections:\n  local:\n    kind: docker\n"
+const validUserDocument = "schema: 1\nruntimeConnections:\n  local:\n    kind: docker\n    context: default\n"
 
 func TestValidateAuthored(t *testing.T) {
 	tests := []struct {
@@ -160,6 +160,41 @@ func TestValidateCollectsIndependentErrors(t *testing.T) {
 	}
 	if len(aggregate.Errs) < 3 {
 		t.Errorf("collected %d errors, want at least 3:\n%v", len(aggregate.Errs), err)
+	}
+}
+
+func TestRuntimeConnectionLocators(t *testing.T) {
+	tests := []struct {
+		name string
+		user string
+		want string
+	}{
+		{"docker requires a locator", "schema: 1\nruntimeConnections:\n  local:\n    kind: docker\n", "exactly one"},
+		{"docker rejects two locators", "schema: 1\nruntimeConnections:\n  local:\n    kind: docker\n    context: default\n    socket: /tmp/docker.sock\n", "exactly one"},
+		{"podman requires a locator", "schema: 1\nruntimeConnections:\n  local:\n    kind: podman\n", "exactly one"},
+		{"apple rejects a context", "schema: 1\nruntimeConnections:\n  local:\n    kind: apple\n    context: local\n", "local runtime"},
+		{"apple rejects a socket", "schema: 1\nruntimeConnections:\n  local:\n    kind: apple\n    socket: /tmp/apple.sock\n", "local runtime"},
+	}
+	project := "schema: 1\nproject:\n  name: demo\n  odooVersion: \"18.0\"\n  runtimeConnection: local\n"
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := resolveDocuments(t, project, tc.user)
+			if err == nil || !errors.Is(err, ErrAuthored) || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want authored error containing %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestUnixSocketNormalization(t *testing.T) {
+	project := "schema: 1\nproject:\n  name: demo\n  odooVersion: \"18.0\"\n  runtimeConnection: local\n"
+	user := "schema: 1\nruntimeConnections:\n  local:\n    kind: docker\n    socket: unix:///var/run/../run/docker.sock\n"
+	result, err := resolveDocuments(t, project, user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Config.RuntimeConnection.Socket != "unix:///var/run/docker.sock" {
+		t.Fatalf("socket = %q", result.Config.RuntimeConnection.Socket)
 	}
 }
 

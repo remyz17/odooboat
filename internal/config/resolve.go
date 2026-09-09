@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"path/filepath"
 	"sort"
 )
@@ -215,8 +216,19 @@ func resolveRuntimeConnection(user *loaded[UserDocument], name string) ResolvedR
 	}
 	resolved.Kind = entry.Kind
 	resolved.Context = entry.Context
-	resolved.Socket = resolveRelative(user.dir, entry.Socket)
+	resolved.Socket = normalizeSocket(user.dir, entry.Socket)
 	return resolved
+}
+
+func normalizeSocket(base, value string) string {
+	if value == "" {
+		return ""
+	}
+	parsed, err := url.Parse(value)
+	if err == nil && parsed.Scheme == "unix" && parsed.Host == "" && parsed.Path != "" {
+		return "unix://" + filepath.Clean(parsed.Path)
+	}
+	return resolveRelative(base, value)
 }
 
 func resolvePreferences(prov Provenance, user *loaded[UserDocument]) ResolvedPreferences {

@@ -50,7 +50,16 @@ func validateUserDocument(doc *loaded[UserDocument]) error {
 				"runtime connection name "+nameRule, name, "")
 		}
 		switch entry.Kind {
-		case RuntimeKindDocker, RuntimeKindPodman, RuntimeKindApple:
+		case RuntimeKindDocker, RuntimeKindPodman:
+			if (entry.Context == "") == (entry.Socket == "") {
+				c.addField(ErrAuthored, FieldPath(authored), ref.ref(authored),
+					"docker and podman connections require exactly one of context or socket", "", "")
+			}
+		case RuntimeKindApple:
+			if entry.Context != "" || entry.Socket != "" {
+				c.addField(ErrAuthored, FieldPath(authored), ref.ref(authored),
+					"apple connections represent the local runtime and reject context and socket", "", "")
+			}
 		case "":
 			c.addField(ErrAuthored, FieldPath(authored+".kind"), ref.ref(authored),
 				"runtime connection kind is required", "",
