@@ -11,3 +11,7 @@ func acquireLock(string) (*heldLock, error) {
 }
 
 func (*heldLock) close() {}
+
+func tryLock(string) (*heldLock, error) {
+	return nil, fmt.Errorf("environment locking is unsupported on this operating system")
+}
