@@ -5,17 +5,24 @@ import (
 	"fmt"
 
 	"github.com/remyz17/odooboat/internal/config"
+	"github.com/remyz17/odooboat/internal/runtime"
 	"github.com/remyz17/odooboat/internal/state"
 	"github.com/remyz17/odooboat/internal/workspace"
 )
 
 type WorkspaceService struct {
-	store state.Store
+	store    state.Store
+	locker   state.Locker
+	runtimes runtime.Connector
+	version  string
 }
 
 var (
 	ErrState              = workspace.ErrState
 	ErrDuplicateWorkspace = workspace.ErrDuplicate
+	ErrEnvironmentBusy    = state.ErrEnvironmentBusy
+	ErrRuntimeUnavailable = runtime.ErrUnavailable
+	ErrRuntimeUnsupported = runtime.ErrUnsupported
 )
 
 type WorkspaceStatus string
@@ -27,8 +34,10 @@ const (
 	WorkspaceStatusDuplicate     WorkspaceStatus = "duplicate"
 )
 
-func NewWorkspaceService(store state.Store) WorkspaceService {
-	return WorkspaceService{store: store}
+// NewWorkspaceService wires the state, lock, and runtime boundaries. Version
+// identifies this binary in lock holder records.
+func NewWorkspaceService(store state.Store, locker state.Locker, runtimes runtime.Connector, version string) WorkspaceService {
+	return WorkspaceService{store: store, locker: locker, runtimes: runtimes, version: version}
 }
 
 type WorkspaceShowRequest struct{ Selector Selector }

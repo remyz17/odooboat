@@ -10,6 +10,7 @@ import (
 
 	"github.com/remyz17/odooboat/internal/app"
 	"github.com/remyz17/odooboat/internal/config"
+	"github.com/remyz17/odooboat/internal/runtime"
 	statefile "github.com/remyz17/odooboat/internal/state/file"
 	"github.com/spf13/cobra"
 )
@@ -31,10 +32,15 @@ type run struct {
 
 func execute(t *testing.T, workingDir string, args ...string) run {
 	t.Helper()
+	return executeWith(t, runtime.Connectors{}, workingDir, args...)
+}
+
+func executeWith(t *testing.T, runtimes runtime.Connector, workingDir string, args ...string) run {
+	t.Helper()
 	var stdout, stderr bytes.Buffer
 	root := NewRootCommand(Dependencies{
 		Config:     app.NewConfigService(),
-		Workspace:  app.NewWorkspaceService(statefile.New()),
+		Workspace:  app.NewWorkspaceService(statefile.New(), statefile.New(), runtimes, "test"),
 		Stdin:      strings.NewReader(""),
 		Stdout:     &stdout,
 		Stderr:     &stderr,
@@ -204,7 +210,7 @@ func TestExitCodes(t *testing.T) {
 
 func TestConfigurationErrorsDoNotPrintUsage(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := Run(context.Background(), fixtureArgs(t, "config", "validate", "--project", filepath.Join(t.TempDir(), "nope.yaml")), Dependencies{Config: app.NewConfigService(), Workspace: app.NewWorkspaceService(statefile.New()), Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr, WorkingDir: t.TempDir()})
+	code := Run(context.Background(), fixtureArgs(t, "config", "validate", "--project", filepath.Join(t.TempDir(), "nope.yaml")), Dependencies{Config: app.NewConfigService(), Workspace: app.NewWorkspaceService(statefile.New(), statefile.New(), runtime.Connectors{}, "test"), Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr, WorkingDir: t.TempDir()})
 	if code != ExitConfig {
 		t.Errorf("exit code = %d, want %d", code, ExitConfig)
 	}
@@ -215,7 +221,7 @@ func TestConfigurationErrorsDoNotPrintUsage(t *testing.T) {
 
 func TestUsageErrorsPrintUsage(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := Run(context.Background(), []string{"bogus"}, Dependencies{Config: app.NewConfigService(), Workspace: app.NewWorkspaceService(statefile.New()), Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr, WorkingDir: t.TempDir()})
+	code := Run(context.Background(), []string{"bogus"}, Dependencies{Config: app.NewConfigService(), Workspace: app.NewWorkspaceService(statefile.New(), statefile.New(), runtime.Connectors{}, "test"), Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr, WorkingDir: t.TempDir()})
 	if code != ExitUsage {
 		t.Errorf("exit code = %d, want %d", code, ExitUsage)
 	}

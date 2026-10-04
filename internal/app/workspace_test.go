@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/remyz17/odooboat/internal/config"
+	"github.com/remyz17/odooboat/internal/runtime"
 	statefile "github.com/remyz17/odooboat/internal/state/file"
 	"github.com/remyz17/odooboat/internal/workspace"
 )
@@ -28,7 +29,7 @@ func statefulSelector(t *testing.T) (Selector, string) {
 
 func TestWorkspaceAndEnvironmentLifecycle(t *testing.T) {
 	selector, root := statefulSelector(t)
-	service := NewWorkspaceService(statefile.New())
+	service := NewWorkspaceService(statefile.New(), statefile.New(), runtime.Connectors{}, "test")
 	ctx := context.Background()
 
 	show, err := service.Show(ctx, WorkspaceShowRequest{Selector: selector})
@@ -67,7 +68,7 @@ func TestWorkspaceAndEnvironmentLifecycle(t *testing.T) {
 
 func TestMovePreservesIdentityAndCopyRequiresRekey(t *testing.T) {
 	selector, oldRoot := statefulSelector(t)
-	service := NewWorkspaceService(statefile.New())
+	service := NewWorkspaceService(statefile.New(), statefile.New(), runtime.Connectors{}, "test")
 	first, err := service.BindEnvironment(context.Background(), EnvironmentBindRequest{Selector: selector})
 	if err != nil {
 		t.Fatal(err)
