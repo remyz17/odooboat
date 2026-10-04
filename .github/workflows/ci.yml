@@ -22,6 +22,7 @@ jobs:
           cache: true
       - run: go test -race ./...
       - run: go vet ./...
+      - run: go vet -tags integration ./...
       - name: Check dependency direction
         shell: bash
         run: |
@@ -32,5 +33,21 @@ jobs:
           fi
           if grep -R --include='*.go' -n 'github.com/spf13/cobra' internal/app internal/config internal/workspace internal/state; then
             echo "Cobra must remain inside internal/cli"
+            exit 1
+          fi
+          if grep -R --include='*.go' -ln 'github.com/moby/moby' internal | grep -v '^internal/runtime/docker/'; then
+            echo "The Moby SDK must remain inside internal/runtime/docker"
+            exit 1
+          fi
+          if go list -deps ./internal/runtime ./internal/runtime/runtimetest | grep -E '/internal/runtime/[a-z]+$' | grep -v '/runtimetest$'; then
+            echo "internal/runtime must not import its adapters"
+            exit 1
+          fi
+          if go list -deps ./internal/app ./internal/cli | grep -q 'github.com/moby/moby'; then
+            echo "Application and CLI packages must not depend on the Moby SDK"
+            exit 1
+          fi
+          if go list -deps ./internal/app ./internal/cli | grep -q '/internal/runtime/docker$'; then
+            echo "Application and CLI packages must reach runtimes only through internal/runtime"
             exit 1
           fi
