@@ -1,16 +1,20 @@
 package cli
 
 import (
+	"fmt"
+	"time"
+
 	"github.com/remyz17/odooboat/internal/app"
 	"github.com/spf13/cobra"
 )
 
 func newEnvironmentCommand(deps Dependencies, global *globalFlags) *cobra.Command {
 	cmd := &cobra.Command{
-		Use: "environment", Short: "Inspect and bind environment identity",
+		Use: "environment", Short: "Inspect, bind, and verify environment identity",
 		Args: noSubcommand, RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
-	cmd.AddCommand(newEnvironmentShowCommand(deps, global), newEnvironmentBindCommand(deps, global))
+	cmd.AddCommand(newEnvironmentShowCommand(deps, global), newEnvironmentBindCommand(deps, global),
+		newEnvironmentVerifyCommand(deps, global))
 	return cmd
 }
 
@@ -56,4 +60,37 @@ func newEnvironmentBindCommand(deps Dependencies, global *globalFlags) *cobra.Co
 	}
 	addOverrideFlags(cmd)
 	return cmd
+}
+
+func newEnvironmentVerifyCommand(deps Dependencies, global *globalFlags) *cobra.Command {
+	cmd := &cobra.Command{
+		Use: "verify", Short: "Reach the bound runtime and record or compare its engine identity", Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			selector := global.selector(cmd, deps)
+			result, err := deps.Workspace.VerifyEnvironment(cmd.Context(), app.EnvironmentVerifyRequest{
+				Selector: selector,
+				Wait: app.WaitOptions{Policy: app.Wait, OnWait: func(holder *app.LockHolder) {
+					fmt.Fprintln(deps.Stderr, waitingMessage(holder))
+				}},
+			})
+			if err != nil {
+				return err
+			}
+			format, err := global.formatOf(result.Preferences)
+			if err != nil {
+				return err
+			}
+			return render(deps.Stdout, format, result)
+		},
+	}
+	addOverrideFlags(cmd)
+	return cmd
+}
+
+func waitingMessage(holder *app.LockHolder) string {
+	if holder == nil {
+		return "odooboat: waiting for the environment lock held by an unknown process"
+	}
+	return fmt.Sprintf("odooboat: waiting for the environment lock held by %q (pid %d on %s since %s)",
+		holder.Operation, holder.PID, holder.Host, holder.StartedAt.Local().Format(time.TimeOnly))
 }

@@ -16,11 +16,13 @@ var Version = "dev"
 
 // Process exit codes.
 const (
-	ExitOK     = 0
-	ExitError  = 1
-	ExitUsage  = 2
-	ExitConfig = 3
-	ExitState  = 4
+	ExitOK      = 0
+	ExitError   = 1
+	ExitUsage   = 2
+	ExitConfig  = 3
+	ExitState   = 4
+	ExitRuntime = 5
+	ExitBusy    = 6
 )
 
 // ErrUsage marks a failure of CLI syntax, the only class that prints usage text.
@@ -127,6 +129,10 @@ func ExitCode(err error) int {
 		return ExitConfig
 	case errors.Is(err, app.ErrState):
 		return ExitState
+	case errors.Is(err, app.ErrRuntimeUnavailable), errors.Is(err, app.ErrRuntimeUnsupported):
+		return ExitRuntime
+	case errors.Is(err, app.ErrEnvironmentBusy):
+		return ExitBusy
 	default:
 		return ExitError
 	}
