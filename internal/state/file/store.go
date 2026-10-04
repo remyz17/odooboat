@@ -72,6 +72,8 @@ func (s Store) Mutate(location workspace.Location, fn func(workspace.State, bool
 	if !changed {
 		return next, nil
 	}
+	// Older readable schemas are upgraded on the next write (ADR 0004 A1).
+	next.Schema = workspace.SchemaVersion
 	if err := workspace.Validate(next); err != nil {
 		return workspace.State{}, err
 	}

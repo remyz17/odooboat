@@ -7,7 +7,11 @@ import (
 	"regexp"
 )
 
-const SchemaVersion = 1
+// SchemaVersion is the state schema written by this binary. Schema 1 is still
+// read and is upgraded on the next mutation (ADR 0004 A1).
+const SchemaVersion = 2
+
+const minSchemaVersion = 1
 
 var (
 	ErrState             = errors.New("workspace state operation failed")
@@ -35,8 +39,18 @@ type Connection struct {
 }
 
 type Binding struct {
-	ID         string     `json:"id"`
-	Connection Connection `json:"runtimeConnection"`
+	ID         string        `json:"id"`
+	Connection Connection    `json:"runtimeConnection"`
+	Engine     *EngineRecord `json:"engine,omitempty"`
+}
+
+// EngineRecord is the engine identity recorded lazily under the environment
+// lock: either an opaque source/value pair, or Unavailable when the adapter
+// cannot identify its engine.
+type EngineRecord struct {
+	Source      string `json:"source,omitempty" yaml:"source,omitempty"`
+	Value       string `json:"value,omitempty" yaml:"value,omitempty"`
+	Unavailable bool   `json:"unavailable,omitempty" yaml:"unavailable,omitempty"`
 }
 
 type Identity struct {

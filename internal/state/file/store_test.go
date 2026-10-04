@@ -148,3 +148,36 @@ func TestFailedMutationDoesNotReplaceValidState(t *testing.T) {
 		t.Fatal("failed mutation replaced valid state")
 	}
 }
+
+func TestSchemaOneIsUpgradedOnNextMutation(t *testing.T) {
+	root := t.TempDir()
+	location := testLocation(root)
+	if err := os.MkdirAll(filepath.Dir(location.StateFile), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	legacy := `{"schema":1,"workspace":{"id":"11111111-1111-4111-8111-111111111111","root":"` + root +
+		`","projectFile":"` + location.ProjectFile + `","stateFile":"` + location.StateFile + `"},"environments":{}}`
+	if err := os.WriteFile(location.StateFile, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store := New()
+	if value, _, err := store.Load(location.StateFile); err != nil || value.Schema != 1 {
+		t.Fatalf("load legacy = %+v, %v", value, err)
+	}
+	if _, err := store.Mutate(location, func(value workspace.State, _ bool) (workspace.State, bool, error) {
+		return value, false, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if value, _, _ := store.Load(location.StateFile); value.Schema != 1 {
+		t.Fatal("an unchanged mutation rewrote the state")
+	}
+	if _, err := store.Mutate(location, func(value workspace.State, _ bool) (workspace.State, bool, error) {
+		return value, true, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if value, _, err := store.Load(location.StateFile); err != nil || value.Schema != workspace.SchemaVersion {
+		t.Fatalf("upgraded state = %+v, %v", value, err)
+	}
+}

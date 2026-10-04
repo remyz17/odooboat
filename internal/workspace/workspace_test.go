@@ -90,3 +90,37 @@ func TestValidateRejectsUnsafeState(t *testing.T) {
 		t.Fatalf("error = %v, want ErrCorrupt", err)
 	}
 }
+
+func TestValidateSchemaAndEngine(t *testing.T) {
+	root := t.TempDir()
+	connection := Connection{Alias: "local", Kind: "docker", Context: "default"}
+	cases := []struct {
+		name   string
+		schema int
+		engine *EngineRecord
+		valid  bool
+	}{
+		{"schema 1 without engine", 1, nil, true},
+		{"schema 1 with engine", 1, &EngineRecord{Source: "docker.info.id", Value: "x"}, false},
+		{"schema 2 without engine", 2, nil, true},
+		{"schema 2 identity", 2, &EngineRecord{Source: "docker.info.id", Value: "x"}, true},
+		{"schema 2 unavailable", 2, &EngineRecord{Unavailable: true}, true},
+		{"unavailable with value", 2, &EngineRecord{Unavailable: true, Value: "x"}, false},
+		{"missing value", 2, &EngineRecord{Source: "docker.info.id"}, false},
+		{"empty record", 2, &EngineRecord{}, false},
+		{"schema 3", 3, nil, false},
+		{"schema 0", 0, nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			value := testState(t, root, filepath.Join(root, "state.json"), filepath.Join(root, "odooboat.yaml"))
+			value.Schema = tc.schema
+			id, _ := NewUUID()
+			value.Environments["dev"] = Binding{ID: id, Connection: connection, Engine: tc.engine}
+			err := Validate(value)
+			if tc.valid && err != nil || !tc.valid && !errors.Is(err, ErrCorrupt) {
+				t.Fatalf("validate = %v, valid %v", err, tc.valid)
+			}
+		})
+	}
+}

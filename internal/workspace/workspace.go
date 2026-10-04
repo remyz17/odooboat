@@ -49,7 +49,7 @@ func Inspect(store Reader, location Location) (Inspection, error) {
 }
 
 func Validate(value State) error {
-	if value.Schema != SchemaVersion {
+	if value.Schema < minSchemaVersion || value.Schema > SchemaVersion {
 		return fmt.Errorf("%w: schema %d is not supported", ErrCorrupt, value.Schema)
 	}
 	if !ValidUUID(value.Workspace.ID) {
@@ -91,6 +91,25 @@ func Validate(value State) error {
 		default:
 			return fmt.Errorf("%w: unknown runtime kind for %q", ErrCorrupt, name)
 		}
+		if err := validateEngine(value.Schema, binding.Engine); err != nil {
+			return fmt.Errorf("%w: invalid engine identity for %q: %v", ErrCorrupt, name, err)
+		}
+	}
+	return nil
+}
+
+func validateEngine(schema int, engine *EngineRecord) error {
+	switch {
+	case engine == nil:
+		return nil
+	case schema < 2:
+		return fmt.Errorf("not allowed in schema %d", schema)
+	case engine.Unavailable:
+		if engine.Source != "" || engine.Value != "" {
+			return fmt.Errorf("an unavailable identity has no source or value")
+		}
+	case engine.Source == "" || engine.Value == "":
+		return fmt.Errorf("source and value are required")
 	}
 	return nil
 }
