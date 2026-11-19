@@ -1,0 +1,28 @@
+# Supported Odoo runtime combinations (ADR 0008 §1).
+#
+# Single source of truth: the odooboat binary embeds this file to resolve
+# defaults and validate configuration, and CI reads it to build base images.
+# Adding or retiring a series is a deliberate decision announced in release
+# notes. Change values only here, with their upstream evidence.
+schema: 1
+
+series:
+  # Evidence, checked 2026-11-17:
+  # - python: odoo/__init__.py MIN_PY_VERSION = (3, 10); documentation
+  #   "Odoo requires Python 3.10 or later". 3.13 is left out until a base image
+  #   passes the helper suite on it.
+  # - postgres: documentation "supported versions: 12.0 or above"; PGDG
+  #   publishes clients 12-17 for bookworm on amd64 and arm64.
+  # - wkhtmltopdf: wkhtmltopdf/packaging release 0.12.6.1-3 ships
+  #   bookworm_amd64 and bookworm_arm64 packages.
+  "18.0":
+    distro: debian-bookworm
+    python:
+      supported: ["3.10", "3.11", "3.12"]
+      default: "3.12"
+    postgres:
+      supported: [12, 13, 14, 15, 16, 17]
+      default: 16
+    wkhtmltopdf:
+      version: "0.12.6.1-3"
+      build: bookworm

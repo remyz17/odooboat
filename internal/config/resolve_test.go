@@ -53,6 +53,21 @@ func TestResolveDefaultEnvironment(t *testing.T) {
 	if cfg.OdooVersion != "18.0" {
 		t.Errorf("odooVersion = %q, want 18.0", cfg.OdooVersion)
 	}
+	// Python is not authored: the matrix default for 18.0 applies. Postgres is
+	// authored by the project and overrides the matrix default.
+	if cfg.Python != "3.12" || cfg.Postgres != 15 {
+		t.Errorf("python, postgres = %q, %d, want 3.12, 15", cfg.Python, cfg.Postgres)
+	}
+	if len(cfg.Unsupported) != 0 || cfg.Unsupported == nil {
+		t.Errorf("unsupported = %#v, want an empty list", cfg.Unsupported)
+	}
+	// The project authors community; the local document adds enterprise.
+	source := cfg.Odoo.Source
+	if source.Mode != SourceModeMount ||
+		source.Community == nil || source.Community.Path != filepath.Join(root, "odoo", "community") ||
+		source.Enterprise == nil || source.Enterprise.Path != filepath.Join(root, "odoo", "enterprise") {
+		t.Errorf("odoo source = %+v", source)
+	}
 	// The local document overrides the project-level connection.
 	if cfg.RuntimeConnection.Name != "local" || cfg.RuntimeConnection.Kind != RuntimeKindDocker {
 		t.Errorf("runtimeConnection = %+v, want local/docker", cfg.RuntimeConnection)
@@ -83,8 +98,11 @@ func TestResolveEnvironmentOverlay(t *testing.T) {
 	root := fixtureRoot(t)
 	cfg := resolveFixture(t, "dev", InvocationPatch{}).Config
 
-	if cfg.OdooVersion != "17.0" {
-		t.Errorf("odooVersion = %q, want the environment overlay value 17.0", cfg.OdooVersion)
+	if cfg.Python != "3.10" {
+		t.Errorf("python = %q, want the environment overlay value 3.10", cfg.Python)
+	}
+	if cfg.OdooVersion != "18.0" || cfg.Postgres != 15 {
+		t.Errorf("odooVersion, postgres = %q, %d, want the inherited 18.0, 15", cfg.OdooVersion, cfg.Postgres)
 	}
 	// The local environment overlay wins over the project environment overlay.
 	if cfg.RuntimeConnection.Name != "remote" || cfg.RuntimeConnection.Kind != RuntimeKindPodman {
@@ -123,12 +141,13 @@ func TestResolveEmptyListClearsInheritedList(t *testing.T) {
 }
 
 func TestResolveInvocationPatchWins(t *testing.T) {
-	version := "16.0"
+	python := "3.11"
+	postgres := 16
 	connection := "remote"
-	cfg := resolveFixture(t, "dev", InvocationPatch{OdooVersion: &version, RuntimeConnection: &connection}).Config
+	cfg := resolveFixture(t, "dev", InvocationPatch{Python: &python, Postgres: &postgres, RuntimeConnection: &connection}).Config
 
-	if cfg.OdooVersion != version {
-		t.Errorf("odooVersion = %q, want the invocation value %q", cfg.OdooVersion, version)
+	if cfg.Python != python || cfg.Postgres != postgres {
+		t.Errorf("python, postgres = %q, %d, want the invocation values %q, %d", cfg.Python, cfg.Postgres, python, postgres)
 	}
 	if cfg.RuntimeConnection.Name != connection {
 		t.Errorf("runtimeConnection = %q, want %q", cfg.RuntimeConnection.Name, connection)

@@ -81,7 +81,13 @@ func decodeFile[T any](kind SourceKind, path string) (*loaded[T], error) {
 		}
 		return nil, fileErr(kind, path, ErrNotFound, err.Error(), "")
 	}
+	return decodeBytes[T](kind, path, data)
+}
 
+// decodeBytes applies the strict decoding rules to a document that did not come
+// from disk, such as the embedded version matrix. path is used for messages and
+// relative-path resolution only.
+func decodeBytes[T any](kind SourceKind, path string, data []byte) (*loaded[T], error) {
 	root, err := parseSingleDocument(kind, path, data)
 	if err != nil {
 		return nil, err

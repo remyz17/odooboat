@@ -36,6 +36,21 @@ const (
 	FieldOdooOptions        FieldPath = "odoo.options"
 	FieldPreferencesOutput  FieldPath = "preferences.output"
 	FieldPreferencesColor   FieldPath = "preferences.color"
+	FieldPython             FieldPath = "python"
+	FieldPostgres           FieldPath = "postgres"
+	FieldAllowUnsupported   FieldPath = "allowUnsupported"
+	FieldBaseImage          FieldPath = "baseImage"
+	FieldOdooCommunity      FieldPath = "odoo.source.community"
+	FieldOdooEnterprise     FieldPath = "odoo.source.enterprise"
+	// FieldUnsupported is derived from the resolved combination, never authored.
+	FieldUnsupported FieldPath = "unsupported"
+)
+
+// Odoo source presentation modes (ADR 0008 §9). Community and enterprise share
+// one mode.
+const (
+	SourceModeMount    = "mount"
+	SourceModeEmbedded = "embedded"
 )
 
 func AddonField(name, leaf string) FieldPath {
@@ -78,6 +93,10 @@ type ProjectDocument struct {
 type ProjectDefinition struct {
 	Name              string                 `yaml:"name"`
 	OdooVersion       string                 `yaml:"odooVersion"`
+	Python            *string                `yaml:"python"`
+	Postgres          *int                   `yaml:"postgres"`
+	AllowUnsupported  *[]string              `yaml:"allowUnsupported"`
+	BaseImage         *string                `yaml:"baseImage"`
 	RuntimeConnection string                 `yaml:"runtimeConnection"`
 	Addons            map[string]AddonSource `yaml:"addons"`
 	PythonPackages    *[]string              `yaml:"pythonPackages"`
@@ -94,6 +113,28 @@ type AddonSource struct {
 type OdooSettings struct {
 	MasterPassword *SecretRef        `yaml:"masterPassword"`
 	Options        map[string]string `yaml:"options"`
+	Source         *OdooSource       `yaml:"source"`
+}
+
+// LocalOdooSettings exposes only the Odoo fields a local document owns: source
+// locations are machine-specific, the other Odoo settings are shared intent.
+type LocalOdooSettings struct {
+	Source *OdooSource `yaml:"source"`
+}
+
+// OdooSource declares the Odoo code an environment runs, separately from
+// addons (ADR 0008 §8). Each entry is replaced as a whole by a higher owner.
+type OdooSource struct {
+	Community  *SourceLocation `yaml:"community"`
+	Enterprise *SourceLocation `yaml:"enterprise"`
+}
+
+// SourceLocation is either a local path presented as a bind mount, or a Git
+// repository pinned to a commit and embedded in the environment image.
+type SourceLocation struct {
+	Path   string `yaml:"path"`
+	Git    string `yaml:"git"`
+	Commit string `yaml:"commit"`
 }
 
 // SecretRef carries exactly one of Env or Literal.
@@ -104,6 +145,10 @@ type SecretRef struct {
 
 type EnvironmentOverlay struct {
 	OdooVersion       *string                `yaml:"odooVersion"`
+	Python            *string                `yaml:"python"`
+	Postgres          *int                   `yaml:"postgres"`
+	AllowUnsupported  *[]string              `yaml:"allowUnsupported"`
+	BaseImage         *string                `yaml:"baseImage"`
 	RuntimeConnection *string                `yaml:"runtimeConnection"`
 	Addons            map[string]AddonSource `yaml:"addons"`
 	PythonPackages    *[]string              `yaml:"pythonPackages"`
@@ -118,19 +163,31 @@ type LocalDocument struct {
 
 type LocalProjectOverlay struct {
 	RuntimeConnection *string                `yaml:"runtimeConnection"`
+	AllowUnsupported  *[]string              `yaml:"allowUnsupported"`
+	BaseImage         *string                `yaml:"baseImage"`
 	Addons            map[string]AddonSource `yaml:"addons"`
+	Odoo              *LocalOdooSettings     `yaml:"odoo"`
 }
 
 type LocalEnvironmentOverlay struct {
 	OdooVersion       *string                `yaml:"odooVersion"`
+	Python            *string                `yaml:"python"`
+	Postgres          *int                   `yaml:"postgres"`
+	AllowUnsupported  *[]string              `yaml:"allowUnsupported"`
+	BaseImage         *string                `yaml:"baseImage"`
 	RuntimeConnection *string                `yaml:"runtimeConnection"`
 	Addons            map[string]AddonSource `yaml:"addons"`
+	Odoo              *LocalOdooSettings     `yaml:"odoo"`
 }
 
 // InvocationPatch holds only values explicitly provided for one invocation.
 // The CLI must populate a field only when its flag was actually changed.
+// allowUnsupported is deliberately absent: accepting an unsupported combination
+// is durable intent, never a one-off override (ADR 0008 §10).
 type InvocationPatch struct {
 	OdooVersion       *string
+	Python            *string
+	Postgres          *int
 	RuntimeConnection *string
 }
 
@@ -140,10 +197,17 @@ type InvocationPatch struct {
 // reach application operations.
 
 type ResolvedConfig struct {
-	ProjectName       string                    `yaml:"projectName" json:"projectName"`
-	ProjectFile       string                    `yaml:"projectFile" json:"projectFile"`
-	EnvironmentName   string                    `yaml:"environment" json:"environment"`
-	OdooVersion       string                    `yaml:"odooVersion" json:"odooVersion"`
+	ProjectName      string      `yaml:"projectName" json:"projectName"`
+	ProjectFile      string      `yaml:"projectFile" json:"projectFile"`
+	EnvironmentName  string      `yaml:"environment" json:"environment"`
+	OdooVersion      string      `yaml:"odooVersion" json:"odooVersion"`
+	Python           string      `yaml:"python" json:"python"`
+	Postgres         int         `yaml:"postgres" json:"postgres"`
+	AllowUnsupported []Dimension `yaml:"allowUnsupported" json:"allowUnsupported"`
+	// Unsupported lists the accepted dimensions that fall outside the matrix.
+	// Inspection commands always report it (ADR 0008 §10).
+	Unsupported       []Dimension               `yaml:"unsupported" json:"unsupported"`
+	BaseImage         string                    `yaml:"baseImage,omitempty" json:"baseImage,omitempty"`
 	RuntimeConnection ResolvedRuntimeConnection `yaml:"runtimeConnection" json:"runtimeConnection"`
 	Addons            []ResolvedAddon           `yaml:"addons" json:"addons"`
 	PythonPackages    []string                  `yaml:"pythonPackages" json:"pythonPackages"`
@@ -165,8 +229,45 @@ type ResolvedAddon struct {
 }
 
 type ResolvedOdoo struct {
-	MasterPassword ResolvedSecret    `yaml:"masterPassword" json:"masterPassword"`
-	Options        map[string]string `yaml:"options" json:"options"`
+	MasterPassword ResolvedSecret     `yaml:"masterPassword" json:"masterPassword"`
+	Options        map[string]string  `yaml:"options" json:"options"`
+	Source         ResolvedOdooSource `yaml:"source" json:"source"`
+}
+
+// ResolvedOdooSource is empty when no source is declared. Configuration
+// commands accept that; operations that run Odoo require a community source.
+type ResolvedOdooSource struct {
+	Mode       string                  `yaml:"mode,omitempty" json:"mode,omitempty"`
+	Community  *ResolvedSourceLocation `yaml:"community,omitempty" json:"community,omitempty"`
+	Enterprise *ResolvedSourceLocation `yaml:"enterprise,omitempty" json:"enterprise,omitempty"`
+}
+
+// Declared reports whether a community source is declared.
+func (s ResolvedOdooSource) Declared() bool { return s.Community != nil }
+
+type ResolvedSourceLocation struct {
+	Path   string `yaml:"path,omitempty" json:"path,omitempty"`
+	Git    string `yaml:"git,omitempty" json:"git,omitempty"`
+	Commit string `yaml:"commit,omitempty" json:"commit,omitempty"`
+}
+
+// Mode returns the presentation mode the location implies.
+func (l ResolvedSourceLocation) Mode() string {
+	if l.Path != "" {
+		return SourceModeMount
+	}
+	return SourceModeEmbedded
+}
+
+func (l *ResolvedSourceLocation) describe() string {
+	switch {
+	case l == nil:
+		return ""
+	case l.Path != "":
+		return l.Path
+	default:
+		return l.Git + "@" + l.Commit
+	}
 }
 
 type ResolvedPreferences struct {
@@ -182,6 +283,20 @@ func (c ResolvedConfig) Lookup(field FieldPath) (string, bool) {
 		return c.ProjectName, true
 	case FieldOdooVersion:
 		return c.OdooVersion, true
+	case FieldPython:
+		return c.Python, true
+	case FieldPostgres:
+		return strconv.Itoa(c.Postgres), true
+	case FieldAllowUnsupported:
+		return joinDimensions(c.AllowUnsupported), true
+	case FieldUnsupported:
+		return joinDimensions(c.Unsupported), true
+	case FieldBaseImage:
+		return c.BaseImage, true
+	case FieldOdooCommunity:
+		return c.Odoo.Source.Community.describe(), true
+	case FieldOdooEnterprise:
+		return c.Odoo.Source.Enterprise.describe(), true
 	case FieldRuntimeConnection:
 		return c.RuntimeConnection.Name, true
 	case FieldPythonPackages:
@@ -235,6 +350,14 @@ func (c ResolvedConfig) EnabledAddons() []ResolvedAddon {
 		}
 	}
 	return out
+}
+
+func joinDimensions(values []Dimension) string {
+	out := make([]string, len(values))
+	for i, value := range values {
+		out[i] = string(value)
+	}
+	return "[" + strings.Join(out, ", ") + "]"
 }
 
 func describeSecret(s ResolvedSecret) string {
