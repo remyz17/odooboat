@@ -29,8 +29,9 @@ go.work.sum
 # MacOS
 .DS_Store
 
-# docs
-docs/
+# Internal design notes (ADRs, spikes): a separate local repository,
+# never pushed. docs/ itself is reserved for user documentation.
+docs/internal/
 
 # spikes
 spikes/
