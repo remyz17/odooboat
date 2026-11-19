@@ -32,6 +32,8 @@ const (
 	CapContainerExitStatus Capability = "container.exit-status"
 	CapRestartPolicy       Capability = "restart.policy"
 	CapImageNoImplicitPull Capability = "image.no-implicit-pull"
+	CapImageBuild          Capability = "image.build"
+	CapImagePull           Capability = "image.pull"
 	CapEngineIdentity      Capability = "engine.identity"
 )
 
