@@ -32,8 +32,8 @@ func TestValidate(t *testing.T) {
 	if result.Sources.EnvironmentName != "dev" {
 		t.Errorf("environment = %q, want dev", result.Sources.EnvironmentName)
 	}
-	if result.Config.OdooVersion != "17.0" {
-		t.Errorf("odooVersion = %q, want 17.0", result.Config.OdooVersion)
+	if result.Config.Python != "3.10" {
+		t.Errorf("python = %q, want 3.10", result.Config.Python)
 	}
 }
 
@@ -43,13 +43,13 @@ func TestExplain(t *testing.T) {
 	t.Run("reports the winning source", func(t *testing.T) {
 		result, err := service.Explain(context.Background(), ExplainRequest{
 			Selector: fixtureSelector(t, "dev"),
-			Field:    config.FieldOdooVersion,
+			Field:    config.FieldPython,
 		})
 		if err != nil {
 			t.Fatalf("explain: %v", err)
 		}
-		if result.Value != "17.0" {
-			t.Errorf("value = %q, want 17.0", result.Value)
+		if result.Value != "3.10" {
+			t.Errorf("value = %q, want 3.10", result.Value)
 		}
 		if result.Winner.Kind != config.SourceEnvironment {
 			t.Errorf("winner = %q, want environment", result.Winner.Kind)

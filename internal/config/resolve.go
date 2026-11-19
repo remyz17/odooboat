@@ -73,7 +73,7 @@ func resolveSources(sources Sources, patch InvocationPatch) (Result, error) {
 	prov.record(FieldProjectName, projectRef.ref("project.name"))
 
 	// Scalars: an explicitly present value replaces, an omitted one inherits.
-	version := &scalarBuilder{prov: prov, field: FieldOdooVersion}
+	version := &scalarBuilder[string]{prov: prov, field: FieldOdooVersion}
 	version.apply(&project.doc.Project.OdooVersion, projectRef.ref("project.odooVersion"))
 	if envOverlay != nil {
 		version.apply(envOverlay.OdooVersion, envRef.ref(envPrefix+".odooVersion"))
@@ -84,7 +84,52 @@ func resolveSources(sources Sources, patch InvocationPatch) (Result, error) {
 	version.apply(patch.OdooVersion, SourceRef{Kind: SourceInvocation, Field: FieldOdooVersion})
 	cfg.OdooVersion = version.value
 
-	connection := &scalarBuilder{prov: prov, field: FieldRuntimeConnection}
+	matrix, err := EmbeddedMatrix()
+	if err != nil {
+		return Result{}, err
+	}
+	entry, seriesKnown := matrix.Lookup(cfg.OdooVersion)
+	resolveRuntimeVersions(&cfg, prov, matrix, entry, seriesKnown, runtimeSources{
+		project: project.doc.Project, env: envOverlay, localEnv: localEnvOverlay, patch: patch,
+		projectRef: projectRef, envRef: envRef, localRef: localRef, envPrefix: envPrefix,
+	})
+
+	allowed := &listBuilder{prov: prov, field: FieldAllowUnsupported}
+	allowed.apply(&[]string{}, SourceRef{Kind: SourceDefault, Field: FieldAllowUnsupported})
+	allowed.apply(project.doc.Project.AllowUnsupported, projectRef.ref("project.allowUnsupported"))
+	baseImage := &scalarBuilder[string]{prov: prov, field: FieldBaseImage}
+	baseImage.apply(new(string), SourceRef{Kind: SourceDefault, Field: FieldBaseImage})
+	bases, err := EmbeddedBases()
+	if err != nil {
+		return Result{}, err
+	}
+	if published, ref, ok := bases.Lookup(cfg.OdooVersion, cfg.Python); ok {
+		baseImage.apply(&published, ref)
+	}
+	baseImage.apply(project.doc.Project.BaseImage, projectRef.ref("project.baseImage"))
+	if envOverlay != nil {
+		allowed.apply(envOverlay.AllowUnsupported, envRef.ref(envPrefix+".allowUnsupported"))
+		baseImage.apply(envOverlay.BaseImage, envRef.ref(envPrefix+".baseImage"))
+	}
+	if local != nil {
+		allowed.apply(local.doc.Project.AllowUnsupported, localRef.ref("project.allowUnsupported"))
+		baseImage.apply(local.doc.Project.BaseImage, localRef.ref("project.baseImage"))
+	}
+	if localEnvOverlay != nil {
+		allowed.apply(localEnvOverlay.AllowUnsupported, localRef.ref(envPrefix+".allowUnsupported"))
+		baseImage.apply(localEnvOverlay.BaseImage, localRef.ref(envPrefix+".baseImage"))
+	}
+	cfg.AllowUnsupported = toDimensions(allowed.value)
+	cfg.BaseImage = baseImage.value
+
+	cfg.Unsupported = []Dimension{}
+	if seriesKnown {
+		if dims := entry.Unsupported(cfg.Python, cfg.Postgres); dims != nil {
+			cfg.Unsupported = dims
+		}
+	}
+
+	connection := &scalarBuilder[string]{prov: prov, field: FieldRuntimeConnection}
 	if project.doc.Project.RuntimeConnection != "" {
 		connection.apply(&project.doc.Project.RuntimeConnection, projectRef.ref("project.runtimeConnection"))
 	}
@@ -132,12 +177,23 @@ func resolveSources(sources Sources, patch InvocationPatch) (Result, error) {
 		options.apply(envOverlay.Odoo.Options, envRef, envPrefix+".odoo.options")
 		secret.apply(envOverlay.Odoo.MasterPassword, envRef.ref(envPrefix+".odoo.masterPassword"))
 	}
-	cfg.Odoo = ResolvedOdoo{MasterPassword: secret.value, Options: options.entries}
+	odooSource := &sourceBuilder{prov: prov}
+	odooSource.apply(project.doc.Project.Odoo.Source, projectRef, "project.odoo.source")
+	if envOverlay != nil && envOverlay.Odoo != nil {
+		odooSource.apply(envOverlay.Odoo.Source, envRef, envPrefix+".odoo.source")
+	}
+	if local != nil && local.doc.Project.Odoo != nil {
+		odooSource.apply(local.doc.Project.Odoo.Source, localRef, "project.odoo.source")
+	}
+	if localEnvOverlay != nil && localEnvOverlay.Odoo != nil {
+		odooSource.apply(localEnvOverlay.Odoo.Source, localRef, envPrefix+".odoo.source")
+	}
+	cfg.Odoo = ResolvedOdoo{MasterPassword: secret.value, Options: options.entries, Source: odooSource.result()}
 	prov.markSecret(FieldOdooMasterPassword)
 
 	cfg.Preferences = resolvePreferences(prov, user)
 
-	if err := validateResolved(cfg, prov, user); err != nil {
+	if err := validateResolved(cfg, prov, user, matrix, seriesKnown); err != nil {
 		return Result{}, err
 	}
 	return Result{Config: cfg, Provenance: prov, Sources: sources}, nil
@@ -250,15 +306,61 @@ func resolvePreferences(prov Provenance, user *loaded[UserDocument]) ResolvedPre
 	return prefs
 }
 
-// --- Per-field merge helpers
-
-type scalarBuilder struct {
-	prov  Provenance
-	field FieldPath
-	value string
+// runtimeSources gathers the owners of python and postgres: the same owners as
+// odooVersion (ADR 0008 §10).
+type runtimeSources struct {
+	project                      ProjectDefinition
+	env                          *EnvironmentOverlay
+	localEnv                     *LocalEnvironmentOverlay
+	patch                        InvocationPatch
+	projectRef, envRef, localRef docRef
+	envPrefix                    string
 }
 
-func (b *scalarBuilder) apply(value *string, ref SourceRef) {
+// resolveRuntimeVersions applies the matrix defaults of the resolved series
+// first, so authored values override them and provenance names the matrix when
+// nothing was authored. An unknown series has no defaults; validation reports
+// the series alone rather than a cascade of empty versions.
+func resolveRuntimeVersions(cfg *ResolvedConfig, prov Provenance, matrix Matrix, entry SeriesEntry, seriesKnown bool, s runtimeSources) {
+	python := &scalarBuilder[string]{prov: prov, field: FieldPython}
+	postgres := &scalarBuilder[int]{prov: prov, field: FieldPostgres}
+	if seriesKnown {
+		python.apply(&entry.DefaultPython, matrix.defaultRef(entry.Series, "python"))
+		postgres.apply(&entry.DefaultPostgres, matrix.defaultRef(entry.Series, "postgres"))
+	}
+	python.apply(s.project.Python, s.projectRef.ref("project.python"))
+	postgres.apply(s.project.Postgres, s.projectRef.ref("project.postgres"))
+	if s.env != nil {
+		python.apply(s.env.Python, s.envRef.ref(s.envPrefix+".python"))
+		postgres.apply(s.env.Postgres, s.envRef.ref(s.envPrefix+".postgres"))
+	}
+	if s.localEnv != nil {
+		python.apply(s.localEnv.Python, s.localRef.ref(s.envPrefix+".python"))
+		postgres.apply(s.localEnv.Postgres, s.localRef.ref(s.envPrefix+".postgres"))
+	}
+	python.apply(s.patch.Python, SourceRef{Kind: SourceInvocation, Field: FieldPython})
+	postgres.apply(s.patch.Postgres, SourceRef{Kind: SourceInvocation, Field: FieldPostgres})
+	cfg.Python = python.value
+	cfg.Postgres = postgres.value
+}
+
+func toDimensions(values []string) []Dimension {
+	out := make([]Dimension, len(values))
+	for i, value := range values {
+		out[i] = Dimension(value)
+	}
+	return out
+}
+
+// --- Per-field merge helpers
+
+type scalarBuilder[T any] struct {
+	prov  Provenance
+	field FieldPath
+	value T
+}
+
+func (b *scalarBuilder[T]) apply(value *T, ref SourceRef) {
 	if value == nil {
 		return
 	}
@@ -303,6 +405,44 @@ func (b *secretBuilder) apply(ref *SecretRef, src SourceRef) {
 		b.value = newLiteralSecret(ref.Literal)
 	}
 	b.prov.record(FieldOdooMasterPassword, src)
+}
+
+// sourceBuilder replaces each Odoo source entry as a whole: mixing the path of
+// one owner with the commit of another would describe a source nobody wrote.
+type sourceBuilder struct {
+	prov       Provenance
+	community  *ResolvedSourceLocation
+	enterprise *ResolvedSourceLocation
+}
+
+func (b *sourceBuilder) apply(source *OdooSource, doc docRef, prefix string) {
+	if source == nil {
+		return
+	}
+	if source.Community != nil {
+		b.community = resolveLocation(doc, *source.Community)
+		b.prov.record(FieldOdooCommunity, doc.ref(prefix+".community"))
+	}
+	if source.Enterprise != nil {
+		b.enterprise = resolveLocation(doc, *source.Enterprise)
+		b.prov.record(FieldOdooEnterprise, doc.ref(prefix+".enterprise"))
+	}
+}
+
+func (b *sourceBuilder) result() ResolvedOdooSource {
+	out := ResolvedOdooSource{Community: b.community, Enterprise: b.enterprise}
+	if b.community != nil {
+		out.Mode = b.community.Mode()
+	}
+	return out
+}
+
+func resolveLocation(doc docRef, location SourceLocation) *ResolvedSourceLocation {
+	return &ResolvedSourceLocation{
+		Path:   resolveRelative(doc.dir, location.Path),
+		Git:    location.Git,
+		Commit: location.Commit,
+	}
 }
 
 type addonState struct {

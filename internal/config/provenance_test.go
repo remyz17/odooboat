@@ -11,8 +11,8 @@ func TestProvenanceRecordsWinnersAndOverrides(t *testing.T) {
 	localFile := filepath.Join(root, "project", LocalFileName)
 	userFile := filepath.Join(root, "user.yaml")
 
-	version := "16.0"
-	result := resolveFixture(t, "dev", InvocationPatch{OdooVersion: &version})
+	python := "3.11"
+	result := resolveFixture(t, "dev", InvocationPatch{Python: &python})
 	prov := result.Provenance
 
 	tests := []struct {
@@ -25,10 +25,29 @@ func TestProvenanceRecordsWinnersAndOverrides(t *testing.T) {
 		secret       bool
 	}{
 		{
-			name:       "invocation override",
-			field:      FieldOdooVersion,
+			name:       "invocation override above a matrix default",
+			field:      FieldPython,
 			winnerKind: SourceInvocation,
-			overridden: []SourceKind{SourceProject, SourceEnvironment},
+			overridden: []SourceKind{SourceMatrix, SourceEnvironment},
+		},
+		{
+			name:       "project overrides the matrix default",
+			field:      FieldPostgres,
+			winnerKind: SourceProject,
+			winnerPath: projectFile,
+			overridden: []SourceKind{SourceMatrix},
+		},
+		{
+			name:       "source entry authored by the local document",
+			field:      FieldOdooEnterprise,
+			winnerKind: SourceLocal,
+			winnerPath: localFile,
+		},
+		{
+			name:       "source entry inherited from the project",
+			field:      FieldOdooCommunity,
+			winnerKind: SourceProject,
+			winnerPath: projectFile,
 		},
 		{
 			name:       "local environment override",
@@ -109,6 +128,19 @@ func TestProvenanceRecordsWinnersAndOverrides(t *testing.T) {
 				t.Errorf("secret = %v, want %v", entry.Secret, tc.secret)
 			}
 		})
+	}
+}
+
+// A matrix default points at its line in the embedded matrix.
+func TestMatrixDefaultProvenance(t *testing.T) {
+	entry, ok := resolveFixture(t, "", InvocationPatch{}).Provenance.Lookup(FieldPython)
+	if !ok {
+		t.Fatal("no provenance for python")
+	}
+	winner := entry.Winner
+	if winner.Kind != SourceMatrix || winner.Path != MatrixPath || winner.Line == 0 ||
+		winner.Field != "series.18.0.python.default" {
+		t.Fatalf("winner = %+v", winner)
 	}
 }
 

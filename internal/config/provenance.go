@@ -15,6 +15,12 @@ const (
 	SourceEnvironment SourceKind = "environment"
 	SourceLocal       SourceKind = "local"
 	SourceInvocation  SourceKind = "invocation"
+	// SourceMatrix marks a default taken from the embedded version matrix
+	// (ADR 0008 §10) rather than a built-in constant.
+	SourceMatrix SourceKind = "matrix"
+	// SourceBases marks a base image taken from the published bases embedded
+	// in the binary (ADR 0008 A3).
+	SourceBases SourceKind = "bases"
 )
 
 // SourceRef locates the authored origin of an effective value.

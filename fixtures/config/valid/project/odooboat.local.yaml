@@ -4,6 +4,10 @@ project:
   addons:
     core:
       path: ../local-core
+  odoo:
+    source:
+      enterprise:
+        path: ../odoo/enterprise
 
 environments:
   dev:

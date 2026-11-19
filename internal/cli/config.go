@@ -11,6 +11,8 @@ import (
 // Thoses are only examples for now, more will be added as the CLI matures.
 const (
 	flagOdooVersion       = "odoo-version"
+	flagPython            = "python"
+	flagPostgres          = "postgres"
 	flagRuntimeConnection = "runtime-connection"
 )
 
@@ -30,6 +32,8 @@ type initOutput struct {
 
 func addOverrideFlags(cmd *cobra.Command) {
 	cmd.Flags().String(flagOdooVersion, "", "override the Odoo version for this invocation")
+	cmd.Flags().String(flagPython, "", "override the Python version for this invocation")
+	cmd.Flags().Int(flagPostgres, 0, "override the PostgreSQL major version for this invocation")
 	cmd.Flags().String(flagRuntimeConnection, "", "override the runtime connection for this invocation")
 }
 
@@ -38,6 +42,14 @@ func invocationPatch(cmd *cobra.Command) config.InvocationPatch {
 	if value, ok := changedString(cmd, flagOdooVersion); ok {
 		patch.OdooVersion = &value
 	}
+	if value, ok := changedString(cmd, flagPython); ok {
+		patch.Python = &value
+	}
+	if changed(cmd, flagPostgres) {
+		// The flag parsed as an int already; the error is impossible here.
+		value, _ := cmd.Flags().GetInt(flagPostgres)
+		patch.Postgres = &value
+	}
 	if value, ok := changedString(cmd, flagRuntimeConnection); ok {
 		patch.RuntimeConnection = &value
 	}
@@ -45,11 +57,15 @@ func invocationPatch(cmd *cobra.Command) config.InvocationPatch {
 }
 
 func changedString(cmd *cobra.Command, name string) (string, bool) {
-	flag := cmd.Flags().Lookup(name)
-	if flag == nil || !flag.Changed {
+	if !changed(cmd, name) {
 		return "", false
 	}
-	return flag.Value.String(), true
+	return cmd.Flags().Lookup(name).Value.String(), true
+}
+
+func changed(cmd *cobra.Command, name string) bool {
+	flag := cmd.Flags().Lookup(name)
+	return flag != nil && flag.Changed
 }
 
 func newConfigCommand(deps Dependencies, global *globalFlags) *cobra.Command {

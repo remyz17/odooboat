@@ -47,6 +47,17 @@ jobs:
             echo "Application and CLI packages must not depend on the Moby SDK"
             exit 1
           fi
+          # YAML decoding stays in internal/config (ADR 0002 §3) and output
+          # rendering in internal/cli; the images package only embeds bytes.
+          if go list -f '{{.ImportPath}}: {{join .Imports " "}}' ./... | grep 'gopkg.in/yaml.v3' \
+            | grep -vE '^github.com/remyz17/odooboat/internal/(config|cli):'; then
+            echo "The YAML codec must remain inside internal/config and internal/cli"
+            exit 1
+          fi
+          if go list -f '{{join .Imports "\n"}}' ./images | grep -vx 'embed'; then
+            echo "The images package must only embed files"
+            exit 1
+          fi
           if go list -deps ./internal/app ./internal/cli | grep -q '/internal/runtime/docker$'; then
             echo "Application and CLI packages must reach runtimes only through internal/runtime"
             exit 1

@@ -74,6 +74,19 @@ func TestInvocationPatchOnlyCarriesChangedFlags(t *testing.T) {
 	if patch.RuntimeConnection != nil {
 		t.Errorf("runtimeConnection = %v, want nil for an unchanged flag", *patch.RuntimeConnection)
 	}
+	if patch.Python != nil || patch.Postgres != nil {
+		t.Errorf("python, postgres = %v, %v, want nil for unchanged flags", patch.Python, patch.Postgres)
+	}
+
+	// An explicit zero is still an explicit value: validation rejects it rather
+	// than the flag default silently overriding the configuration.
+	if err := cmd.ParseFlags([]string{"--python", "3.11", "--postgres", "0"}); err != nil {
+		t.Fatalf("parse flags: %v", err)
+	}
+	patch = invocationPatch(cmd)
+	if patch.Python == nil || *patch.Python != "3.11" || patch.Postgres == nil || *patch.Postgres != 0 {
+		t.Errorf("python, postgres = %v, %v, want 3.11, 0", patch.Python, patch.Postgres)
+	}
 }
 
 func TestPresentationFlagsStayOutOfThePatch(t *testing.T) {
@@ -99,7 +112,8 @@ func TestConfigShowJSON(t *testing.T) {
 
 	var decoded struct {
 		Config struct {
-			OdooVersion string `json:"odooVersion"`
+			Python      string   `json:"python"`
+			Unsupported []string `json:"unsupported"`
 			Odoo        struct {
 				MasterPassword map[string]string `json:"masterPassword"`
 			} `json:"odoo"`
@@ -108,8 +122,12 @@ func TestConfigShowJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(result.stdout), &decoded); err != nil {
 		t.Fatalf("decode json output: %v\n%s", err, result.stdout)
 	}
-	if decoded.Config.OdooVersion != "17.0" {
-		t.Errorf("odooVersion = %q, want 17.0", decoded.Config.OdooVersion)
+	if decoded.Config.Python != "3.10" {
+		t.Errorf("python = %q, want 3.10", decoded.Config.Python)
+	}
+	// Machine output always carries the list, empty rather than null.
+	if decoded.Config.Unsupported == nil || len(decoded.Config.Unsupported) != 0 {
+		t.Errorf("unsupported = %#v, want []", decoded.Config.Unsupported)
 	}
 	if decoded.Config.Odoo.MasterPassword["source"] != "env" {
 		t.Errorf("masterPassword = %v, want an env reference", decoded.Config.Odoo.MasterPassword)
@@ -130,17 +148,17 @@ func TestConfigShowIsDeterministic(t *testing.T) {
 
 func TestRootCommandsAreIndependent(t *testing.T) {
 	projectDir := filepath.Join(fixtureRoot(t), "project")
-	dev := execute(t, projectDir, fixtureArgs(t, "config", "explain", "odooVersion", "--env", "dev")...)
-	base := execute(t, projectDir, fixtureArgs(t, "config", "explain", "odooVersion")...)
+	dev := execute(t, projectDir, fixtureArgs(t, "config", "explain", "python", "--env", "dev")...)
+	base := execute(t, projectDir, fixtureArgs(t, "config", "explain", "python")...)
 
 	if dev.err != nil || base.err != nil {
 		t.Fatalf("explain failed: %v / %v", dev.err, base.err)
 	}
-	if !strings.Contains(dev.stdout, `"17.0"`) {
-		t.Errorf("dev output does not report 17.0:\n%s", dev.stdout)
+	if !strings.Contains(dev.stdout, `"3.10"`) {
+		t.Errorf("dev output does not report 3.10:\n%s", dev.stdout)
 	}
-	if !strings.Contains(base.stdout, `"18.0"`) {
-		t.Errorf("default output does not report 18.0:\n%s", base.stdout)
+	if !strings.Contains(base.stdout, `"3.12"`) || !strings.Contains(base.stdout, "matrix") {
+		t.Errorf("default output does not report the matrix default 3.12:\n%s", base.stdout)
 	}
 }
 
