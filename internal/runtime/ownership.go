@@ -27,11 +27,24 @@ const (
 	LabelRole               = LabelPrefix + "role"
 	LabelOperation          = LabelPrefix + "operation"
 	LabelSpec               = LabelPrefix + "spec"
+	LabelRequires           = LabelPrefix + "requires"
 	LabelPostgresMajor      = LabelPrefix + "data.postgres-major"
 	LabelDisplayProject     = LabelPrefix + "display.project"
 	LabelDisplayEnvironment = LabelPrefix + "display.environment"
 	LabelCreatedBy          = LabelPrefix + "created-by"
 )
+
+// Key classes below the reserved prefix (ADR 0005 A2). The core is decoded
+// strictly; facts, informational keys, and image metadata follow their own rules.
+const (
+	FactPrefix          = LabelPrefix + "data."
+	DisplayPrefix       = LabelPrefix + "display."
+	ImageMetadataPrefix = LabelPrefix + "image."
+)
+
+// KnownFeatures lists the critical extensions this binary understands. A
+// resource whose odooboat.requires names any other feature is read-only.
+var KnownFeatures = []string{}
 
 var ErrInvalidOwnership = errors.New("ownership is invalid")
 
@@ -70,16 +83,24 @@ var roles = map[ResourceType][]Role{
 // Ownership is the decoded form of the ownership labels. It holds only facts
 // fixed when the resource is created; it never describes desired state.
 type Ownership struct {
-	Scope              Scope
-	WorkspaceID        string
-	EnvironmentID      string
-	Role               Role
-	OperationID        string
-	Spec               string
+	Scope         Scope
+	WorkspaceID   string
+	EnvironmentID string
+	Role          Role
+	OperationID   string
+	Spec          string
+	// Requires lists critical extensions a reader must understand to mutate
+	// the resource safely.
+	Requires []string
+	// PostgresMajor is a known fact; zero means the fact is unknown, never a
+	// default (ADR 0005 A2.4).
 	PostgresMajor      int
 	DisplayProject     string
 	DisplayEnvironment string
 	CreatedBy          string
+	// UnrecognizedFacts holds odooboat.data.* keys this binary does not know.
+	// They are reported for diagnostics and never used in decisions.
+	UnrecognizedFacts map[string]string
 }
 
 type ClaimState string
@@ -93,6 +114,9 @@ const (
 	ClaimNewerSchema ClaimState = "newer-schema"
 	// ClaimMalformed: claimed but unreadable; never mutated.
 	ClaimMalformed ClaimState = "malformed"
+	// ClaimRequiresUnknown: odooboat.requires names a feature this binary does
+	// not know; read-only. The ownership is decoded so status can report it.
+	ClaimRequiresUnknown ClaimState = "requires-unknown"
 )
 
 // Claim is the result of decoding the labels of an observed resource.
@@ -107,19 +131,27 @@ var (
 	specRe      = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 	createdByRe = regexp.MustCompile(`^odooboat/[0-9A-Za-z.+-]+$`)
 	positiveRe  = regexp.MustCompile(`^[1-9][0-9]{0,8}$`)
+	featureRe   = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]*$`)
 )
 
 const maxDisplayLength = 128
 
 var knownLabels = []string{
 	LabelSchema, LabelScope, LabelWorkspace, LabelEnvironment, LabelRole, LabelOperation,
-	LabelSpec, LabelPostgresMajor, LabelDisplayProject, LabelDisplayEnvironment, LabelCreatedBy,
+	LabelSpec, LabelRequires, LabelPostgresMajor, LabelDisplayProject, LabelDisplayEnvironment, LabelCreatedBy,
 }
 
-// Labels validates the ownership for a resource type and encodes it.
+// Labels validates the ownership for a resource type and encodes it. A binary
+// only writes features it understands and never writes unrecognized facts.
 func (o Ownership) Labels(t ResourceType) (map[string]string, error) {
 	if err := o.Validate(t); err != nil {
 		return nil, err
+	}
+	if unknown := unknownFeatures(o.Requires); len(unknown) > 0 {
+		return nil, invalid(LabelRequires, "names features unknown to this binary: %s", strings.Join(unknown, ", "))
+	}
+	if len(o.UnrecognizedFacts) > 0 {
+		return nil, invalid(FactPrefix+"*", "unrecognized facts are never written")
 	}
 	labels := map[string]string{
 		LabelSchema:         strconv.Itoa(OwnershipSchema),
@@ -136,6 +168,9 @@ func (o Ownership) Labels(t ResourceType) (map[string]string, error) {
 	}
 	if o.Spec != "" {
 		labels[LabelSpec] = o.Spec
+	}
+	if len(o.Requires) > 0 {
+		labels[LabelRequires] = strings.Join(o.Requires, ",")
 	}
 	if o.PostgresMajor != 0 {
 		labels[LabelPostgresMajor] = strconv.Itoa(o.PostgresMajor)
@@ -176,6 +211,9 @@ func (o Ownership) Validate(t ResourceType) error {
 	if o.Spec != "" && (t != ResourceContainer || !specRe.MatchString(o.Spec)) {
 		return invalid(LabelSpec, "must be sha256:<hex> on a container")
 	}
+	if err := validFeatures(o.Requires); err != nil {
+		return err
+	}
 	wantsMajor := t == ResourceVolume && o.Role == RolePostgresData
 	if wantsMajor != (o.PostgresMajor != 0) || o.PostgresMajor < 0 {
 		return invalid(LabelPostgresMajor, "is required on, and only on, a postgres-data volume")
@@ -190,11 +228,13 @@ func (o Ownership) Validate(t ResourceType) error {
 }
 
 // DecodeOwnership classifies and strictly decodes the labels of an observed
-// resource. Labels outside the odooboat. prefix are ignored.
+// resource. Labels outside the odooboat. prefix are ignored, and so is image
+// metadata, which a container inherits from its image (ADR 0005 A2): a
+// resource carrying only odooboat.image.* labels is unmanaged.
 func DecodeOwnership(t ResourceType, labels map[string]string) Claim {
 	claimed := false
 	for key := range labels {
-		if strings.HasPrefix(key, LabelPrefix) {
+		if strings.HasPrefix(key, LabelPrefix) && !strings.HasPrefix(key, ImageMetadataPrefix) {
 			claimed = true
 			break
 		}
@@ -213,11 +253,6 @@ func DecodeOwnership(t ResourceType, labels map[string]string) Claim {
 	if schema > OwnershipSchema {
 		return Claim{State: ClaimNewerSchema, Schema: schema}
 	}
-	for key := range labels {
-		if strings.HasPrefix(key, LabelPrefix) && !slices.Contains(knownLabels, key) {
-			return malformed(schema, invalid(key, "is not defined by schema %d", schema))
-		}
-	}
 	o := Ownership{
 		Scope:              Scope(labels[LabelScope]),
 		WorkspaceID:        labels[LabelWorkspace],
@@ -229,10 +264,33 @@ func DecodeOwnership(t ResourceType, labels map[string]string) Claim {
 		DisplayEnvironment: labels[LabelDisplayEnvironment],
 		CreatedBy:          labels[LabelCreatedBy],
 	}
+	for key, value := range labels {
+		if !strings.HasPrefix(key, LabelPrefix) || slices.Contains(knownLabels, key) {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(key, ImageMetadataPrefix), strings.HasPrefix(key, DisplayPrefix):
+			// Inherited image metadata and unknown informational keys are ignored.
+		case strings.HasPrefix(key, FactPrefix):
+			if o.UnrecognizedFacts == nil {
+				o.UnrecognizedFacts = map[string]string{}
+			}
+			o.UnrecognizedFacts[key] = value
+		default:
+			return malformed(schema, invalid(key, "is not defined by schema %d", schema))
+		}
+	}
 	if raw, ok := labels[LabelPostgresMajor]; ok {
 		if o.PostgresMajor, ok = canonicalPositive(raw); !ok {
 			return malformed(schema, invalid(LabelPostgresMajor, "must be a positive integer, got %q", raw))
 		}
+	}
+	if raw, ok := labels[LabelRequires]; ok {
+		// An empty list is written by omitting the key, so "" is malformed.
+		if raw == "" {
+			return malformed(schema, invalid(LabelRequires, "is present but empty"))
+		}
+		o.Requires = strings.Split(raw, ",")
 	}
 	// Present but empty values would otherwise decode as absent.
 	for _, key := range []string{LabelEnvironment, LabelSpec, LabelDisplayEnvironment} {
@@ -243,7 +301,51 @@ func DecodeOwnership(t ResourceType, labels map[string]string) Claim {
 	if err := o.Validate(t); err != nil {
 		return malformed(schema, err)
 	}
+	if unknown := unknownFeatures(o.Requires); len(unknown) > 0 {
+		return Claim{State: ClaimRequiresUnknown, Schema: schema, Ownership: o,
+			Err: fmt.Errorf("resource requires features unknown to this binary: %s; upgrade odooboat to modify it",
+				strings.Join(unknown, ", "))}
+	}
 	return Claim{State: ClaimValid, Schema: schema, Ownership: o}
+}
+
+// CheckImageLabels rejects an image whose labels claim ownership. Images may
+// only carry odooboat.image.* metadata; anything else under the reserved
+// prefix would be copied onto every container created from the image.
+func CheckImageLabels(labels map[string]string) error {
+	var offending []string
+	for key := range labels {
+		if strings.HasPrefix(key, LabelPrefix) && !strings.HasPrefix(key, ImageMetadataPrefix) {
+			offending = append(offending, key)
+		}
+	}
+	if len(offending) == 0 {
+		return nil
+	}
+	slices.Sort(offending)
+	return invalid("", "image labels must not claim ownership: %s", strings.Join(offending, ", "))
+}
+
+func validFeatures(features []string) error {
+	for i, feature := range features {
+		if !featureRe.MatchString(feature) {
+			return invalid(LabelRequires, "feature %q must use lowercase letters, digits, \".\" and \"-\"", feature)
+		}
+		if slices.Contains(features[:i], feature) {
+			return invalid(LabelRequires, "feature %q is listed twice", feature)
+		}
+	}
+	return nil
+}
+
+func unknownFeatures(features []string) []string {
+	var unknown []string
+	for _, feature := range features {
+		if !slices.Contains(KnownFeatures, feature) {
+			unknown = append(unknown, feature)
+		}
+	}
+	return unknown
 }
 
 func canonicalPositive(value string) (int, bool) {

@@ -3,6 +3,7 @@ package runtime
 import (
 	"errors"
 	"maps"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -49,7 +50,7 @@ func TestOwnershipRoundTrip(t *testing.T) {
 			}
 			labels["com.example.user"] = "kept by the user"
 			claim := DecodeOwnership(tc.t, labels)
-			if claim.State != ClaimValid || claim.Err != nil || claim.Ownership != tc.o {
+			if claim.State != ClaimValid || claim.Err != nil || !reflect.DeepEqual(claim.Ownership, tc.o) {
 				t.Fatalf("claim = %+v, want %+v", claim, tc.o)
 			}
 		})
@@ -86,7 +87,11 @@ func TestDecodeMalformed(t *testing.T) {
 		{"non canonical schema", ResourceContainer, func(l map[string]string) { l[LabelSchema] = "01" }},
 		{"spaced schema", ResourceContainer, func(l map[string]string) { l[LabelSchema] = " 1" }},
 		{"zero schema", ResourceContainer, func(l map[string]string) { l[LabelSchema] = "0" }},
-		{"unknown key", ResourceContainer, func(l map[string]string) { l["odooboat.data.other"] = "x" }},
+		{"unknown core key", ResourceContainer, func(l map[string]string) { l["odooboat.other"] = "x" }},
+		{"empty requires", ResourceContainer, func(l map[string]string) { l[LabelRequires] = "" }},
+		{"bad feature", ResourceContainer, func(l map[string]string) { l[LabelRequires] = "Feature" }},
+		{"duplicate feature", ResourceContainer, func(l map[string]string) { l[LabelRequires] = "a,a" }},
+		{"trailing comma", ResourceContainer, func(l map[string]string) { l[LabelRequires] = "a," }},
 		{"unknown scope", ResourceContainer, func(l map[string]string) { l[LabelScope] = "global" }},
 		{"uppercase workspace", ResourceContainer, func(l map[string]string) { l[LabelWorkspace] = "AAAAAAAA-1111-4111-8111-111111111111" }},
 		{"missing environment", ResourceContainer, func(l map[string]string) { delete(l, LabelEnvironment) }},
@@ -141,7 +146,101 @@ func TestPlatformScope(t *testing.T) {
 	if _, ok := labels[LabelEnvironment]; ok {
 		t.Fatal("platform scope must not carry an environment label")
 	}
-	if claim := DecodeOwnership(ResourceNetwork, labels); claim.State != ClaimValid || claim.Ownership != o {
+	if claim := DecodeOwnership(ResourceNetwork, labels); claim.State != ClaimValid || !reflect.DeepEqual(claim.Ownership, o) {
 		t.Fatalf("claim = %+v", claim)
+	}
+}
+
+// Docker copies image labels onto containers (ADR 0008 §5): inherited image
+// metadata never participates in ownership.
+func TestInheritedImageMetadata(t *testing.T) {
+	image := map[string]string{
+		"odooboat.image.contract": "1", "odooboat.image.series": "18.0",
+		"odooboat.image.python": "3.12", "odooboat.image.kind": "environment",
+	}
+	if claim := DecodeOwnership(ResourceContainer, image); claim.State != ClaimUnmanaged {
+		t.Fatalf("image metadata alone: claim = %+v", claim)
+	}
+
+	o := environmentOwnership(RoleOdoo)
+	labels, err := o.Labels(ResourceContainer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	maps.Copy(labels, image)
+	labels["odooboat.image.future"] = "not validated on containers"
+	if claim := DecodeOwnership(ResourceContainer, labels); claim.State != ClaimValid || !reflect.DeepEqual(claim.Ownership, o) {
+		t.Fatalf("owned container from an odooboat image: claim = %+v", claim)
+	}
+}
+
+func TestUnknownFactsAndInformationalKeys(t *testing.T) {
+	labels, err := environmentOwnership(RolePostgres).Labels(ResourceContainer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	labels["odooboat.data.future-fact"] = "42"
+	labels["odooboat.display.future"] = "ignored"
+	claim := DecodeOwnership(ResourceContainer, labels)
+	if claim.State != ClaimValid {
+		t.Fatalf("claim = %+v", claim)
+	}
+	if want := map[string]string{"odooboat.data.future-fact": "42"}; !reflect.DeepEqual(claim.Ownership.UnrecognizedFacts, want) {
+		t.Fatalf("unrecognized facts = %v, want %v", claim.Ownership.UnrecognizedFacts, want)
+	}
+	if _, err := claim.Ownership.Labels(ResourceContainer); !errors.Is(err, ErrInvalidOwnership) {
+		t.Fatalf("re-encoding unrecognized facts: err = %v", err)
+	}
+}
+
+func TestRequiresUnknownFeatureIsReadOnly(t *testing.T) {
+	labels, err := environmentOwnership(RoleOdoo).Labels(ResourceContainer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := labels[LabelRequires]; ok {
+		t.Fatal("an empty requires list must be omitted")
+	}
+	labels[LabelRequires] = "future-a,future-b"
+	claim := DecodeOwnership(ResourceContainer, labels)
+	if claim.State != ClaimRequiresUnknown || claim.Err == nil {
+		t.Fatalf("claim = %+v", claim)
+	}
+	if got := claim.Ownership.Requires; !reflect.DeepEqual(got, []string{"future-a", "future-b"}) {
+		t.Fatalf("requires = %v", got)
+	}
+
+	o := environmentOwnership(RoleOdoo)
+	o.Requires = []string{"future-a"}
+	if _, err := o.Labels(ResourceContainer); !errors.Is(err, ErrInvalidOwnership) {
+		t.Fatalf("writing an unknown feature: err = %v", err)
+	}
+}
+
+func TestRequiresKnownFeatureRoundTrip(t *testing.T) {
+	saved := KnownFeatures
+	KnownFeatures = []string{"split-filestore"}
+	t.Cleanup(func() { KnownFeatures = saved })
+
+	o := environmentOwnership(RoleOdoo)
+	o.Requires = []string{"split-filestore"}
+	labels, err := o.Labels(ResourceContainer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claim := DecodeOwnership(ResourceContainer, labels); claim.State != ClaimValid || !reflect.DeepEqual(claim.Ownership, o) {
+		t.Fatalf("claim = %+v", claim)
+	}
+}
+
+func TestCheckImageLabels(t *testing.T) {
+	ok := map[string]string{"odooboat.image.contract": "1", "org.opencontainers.image.title": "odoo"}
+	if err := CheckImageLabels(ok); err != nil {
+		t.Fatalf("metadata only: %v", err)
+	}
+	claiming := map[string]string{"odooboat.image.contract": "1", LabelWorkspace: testWorkspace, "odooboat.data.x": "1"}
+	err := CheckImageLabels(claiming)
+	if !errors.Is(err, ErrInvalidOwnership) || !strings.Contains(err.Error(), "odooboat.data.x, odooboat.workspace") {
+		t.Fatalf("claiming image: err = %v", err)
 	}
 }
