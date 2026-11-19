@@ -1,0 +1,34 @@
+#!/bin/sh
+# Odooboat image entrypoint, contract 1 (ADR 0008 A2).
+#
+#   entrypoint                 run Odoo with no arguments
+#   entrypoint odoo [ARG...]   run Odoo from /opt/odoo/community with ARG...
+#   entrypoint CMD [ARG...]    run any other command in the image environment
+#
+# The image never contains Odoo: the community source is mounted or copied at
+# /opt/odoo/community by the environment (ADR 0008 §3 and §9).
+set -eu
+
+community=/opt/odoo/community
+
+# Odooboat may run the image as the host user so bind-mounted sources keep
+# their ownership; that UID has no /etc/passwd entry. Python's
+# getpass.getuser(), called by Odoo at startup, then needs USER.
+if [ -z "${USER:-}" ] && ! getent passwd "$(id -u)" >/dev/null 2>&1; then
+	export USER=odoo
+fi
+
+if [ "$#" -eq 0 ]; then
+	set -- odoo
+fi
+
+if [ "$1" = odoo ]; then
+	shift
+	if [ ! -f "$community/odoo-bin" ]; then
+		echo "odooboat: no Odoo source at $community (odoo-bin is missing)" >&2
+		exit 78
+	fi
+	exec python "$community/odoo-bin" "$@"
+fi
+
+exec "$@"

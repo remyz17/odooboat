@@ -1,0 +1,282 @@
+name: Base images
+
+# Builds one base image per series and Python version of images/matrix.yaml,
+# natively on amd64 and arm64, and publishes multi-arch images to GHCR
+# (ADR 0008 §4 and §13). Pull requests build and verify without publishing.
+# The weekly schedule rebuilds every image for security updates.
+
+on:
+  push:
+    branches: [main]
+    paths: &paths
+      - images/**
+      # Written by the bases job: publishing must not trigger itself.
+      - "!images/bases.yaml"
+      - internal/config/**
+      - internal/runtime/image.go
+      - .github/workflows/images.yml
+  pull_request:
+    paths: *paths
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: images-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      stamp: ${{ steps.plan.outputs.stamp }}
+      image: ${{ steps.plan.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - id: plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Dated tags carry the run number so two rebuilds on the same day
+          # never collide; the digest remains the only identity.
+          {
+            echo "matrix=$(go run ./images/ci matrix)"
+            echo "stamp=$(date -u +%Y%m%d)-${{ github.run_number }}"
+            echo "image=ghcr.io/${GITHUB_REPOSITORY,,}/odoo"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix:
+        build: ${{ fromJSON(needs.plan.outputs.matrix).include }}
+        platform:
+          - { arch: amd64, runner: ubuntu-24.04 }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.platform.runner }}
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ${{ needs.plan.outputs.image }}
+      PUBLISH: ${{ github.event_name != 'pull_request' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Fetch series requirements
+        id: series
+        shell: bash
+        run: |
+          set -euo pipefail
+          series='${{ matrix.build.series }}'
+          revision="$(git ls-remote https://github.com/odoo/odoo.git "refs/heads/$series" | cut -f1)"
+          test -n "$revision"
+          mkdir -p "$RUNNER_TEMP/series"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/series/requirements.txt" \
+            "https://raw.githubusercontent.com/odoo/odoo/$revision/requirements.txt"
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+          echo "Odoo $series requirements from $revision" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: images/odoo
+          platforms: linux/${{ matrix.platform.arch }}
+          build-contexts: series=${{ runner.temp }}/series
+          build-args: |
+            SERIES=${{ matrix.build.series }}
+            PYTHON=${{ matrix.build.python }}
+            DISTRO_IMAGE=${{ matrix.build.distroImage }}
+            WKHTMLTOPDF_VERSION=${{ matrix.build.wkhtmltopdfVersion }}
+            WKHTMLTOPDF_BUILD=${{ matrix.build.wkhtmltopdfBuild }}
+            ODOO_REVISION=${{ steps.series.outputs.revision }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          # The scheduled rebuild ignores the cache to pick up security updates.
+          no-cache: ${{ github.event_name == 'schedule' }}
+          cache-from: type=gha,scope=${{ matrix.build.tag }}-${{ matrix.platform.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.build.tag }}-${{ matrix.platform.arch }}
+          load: true
+          tags: odooboat-base:verify
+
+      # The Dockerfile already checks the Python version, that odoo is not
+      # importable, the compiled requirements, and wkhtmltopdf. These steps
+      # check the published metadata and the entrypoint contract.
+      - name: Verify metadata
+        run: docker image inspect odooboat-base:verify | go run ./images/ci verify -series '${{ matrix.build.series }}' -python '${{ matrix.build.python }}'
+
+      # The helper is written for the oldest Python of the matrix and must
+      # pass on every published base image (ADR 0008 §12).
+      - name: Helper test suite
+        run: docker run --rm -v "$PWD/images/helper:/helper:ro" --entrypoint python odooboat-base:verify -I -m unittest discover -s /helper -v
+
+      - name: Verify entrypoint without source
+        shell: bash
+        run: |
+          set +e
+          docker run --rm odooboat-base:verify
+          status=$?
+          set -e
+          test "$status" -eq 78
+
+      - name: Log in to GHCR
+        if: env.PUBLISH == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push by digest
+        id: push
+        if: env.PUBLISH == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: images/odoo
+          platforms: linux/${{ matrix.platform.arch }}
+          build-contexts: series=${{ runner.temp }}/series
+          build-args: |
+            SERIES=${{ matrix.build.series }}
+            PYTHON=${{ matrix.build.python }}
+            DISTRO_IMAGE=${{ matrix.build.distroImage }}
+            WKHTMLTOPDF_VERSION=${{ matrix.build.wkhtmltopdfVersion }}
+            WKHTMLTOPDF_BUILD=${{ matrix.build.wkhtmltopdfBuild }}
+            ODOO_REVISION=${{ steps.series.outputs.revision }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.build.tag }}-${{ matrix.platform.arch }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: Export digest
+        if: env.PUBLISH == 'true'
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/digests"
+          digest='${{ steps.push.outputs.digest }}'
+          touch "$RUNNER_TEMP/digests/${digest#sha256:}"
+
+      - uses: actions/upload-artifact@v4
+        if: env.PUBLISH == 'true'
+        with:
+          name: digests-${{ matrix.build.tag }}-${{ matrix.platform.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: [plan, build]
+    if: github.event_name != 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        build: ${{ fromJSON(needs.plan.outputs.matrix).include }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ${{ needs.plan.outputs.image }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: digests-${{ matrix.build.tag }}-*
+          path: ${{ runner.temp }}/digests
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create multi-arch tags
+        shell: bash
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          set -euo pipefail
+          digests=(*)
+          test "${#digests[@]}" -eq 2
+          tag='${{ matrix.build.tag }}'
+          docker buildx imagetools create \
+            -t "$IMAGE:$tag-${{ needs.plan.outputs.stamp }}" \
+            -t "$IMAGE:$tag" \
+            "${digests[@]/#/$IMAGE@sha256:}"
+          digest="$(docker buildx imagetools inspect "$IMAGE:$tag" --format '{{json .Manifest.Digest}}' | tr -d '"')"
+          echo "$IMAGE:$tag-${{ needs.plan.outputs.stamp }} → $digest" >> "$GITHUB_STEP_SUMMARY"
+          mkdir -p "$RUNNER_TEMP/published"
+          printf '%s %s %s\n' '${{ matrix.build.series }}' '${{ matrix.build.python }}' "$IMAGE@$digest" \
+            > "$RUNNER_TEMP/published/${{ matrix.build.tag }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: published-${{ matrix.build.tag }}
+          path: ${{ runner.temp }}/published/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # Records the published digests in images/bases.yaml through a pull request,
+  # so the next binary defaults to them (ADR 0008 A3). Nothing is committed to
+  # the default branch directly.
+  bases:
+    needs: [plan, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: published-*
+          path: ${{ runner.temp }}/published
+          merge-multiple: true
+      - name: Update bases.yaml
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat "$RUNNER_TEMP"/published/* | while read -r series python image; do
+            go run ./images/ci bases -series "$series" -python "$python" -image "$image"
+          done
+          go test ./internal/config -run TestEmbeddedBasesAreValid
+      - name: Open pull request
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- images/bases.yaml; then
+            echo "bases.yaml is unchanged"
+            exit 0
+          fi
+          branch="images/bases-${{ needs.plan.outputs.stamp }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git commit -m "images: record published base images ${{ needs.plan.outputs.stamp }}" -- images/bases.yaml
+          git push origin "$branch"
+          gh pr create --base "${{ github.event.repository.default_branch }}" --head "$branch" \
+            --title "images: record published base images ${{ needs.plan.outputs.stamp }}" \
+            --body "Digests published by run ${{ github.run_id }}. Generated by images/ci bases."
