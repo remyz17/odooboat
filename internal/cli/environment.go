@@ -10,11 +10,11 @@ import (
 
 func newEnvironmentCommand(deps Dependencies, global *globalFlags) *cobra.Command {
 	cmd := &cobra.Command{
-		Use: "environment", Short: "Inspect, bind, and verify environment identity",
+		Use: "environment", Short: "Inspect, bind, verify, and build environments",
 		Args: noSubcommand, RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
 	cmd.AddCommand(newEnvironmentShowCommand(deps, global), newEnvironmentBindCommand(deps, global),
-		newEnvironmentVerifyCommand(deps, global))
+		newEnvironmentVerifyCommand(deps, global), newEnvironmentBuildCommand(deps, global))
 	return cmd
 }
 
@@ -83,6 +83,38 @@ func newEnvironmentVerifyCommand(deps Dependencies, global *globalFlags) *cobra.
 			return render(deps.Stdout, format, result)
 		},
 	}
+	addOverrideFlags(cmd)
+	return cmd
+}
+
+func newEnvironmentBuildCommand(deps Dependencies, global *globalFlags) *cobra.Command {
+	var pull bool
+	cmd := &cobra.Command{
+		Use:   "build",
+		Short: "Build the environment image, or reuse it when its inputs are unchanged",
+		Long: "Build the environment image from the base image, the PostgreSQL client of the\n" +
+			"environment's server version, the Odoo requirements, and embedded sources.\n" +
+			"An image with the same inputs is reused. Progress is written to stderr.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			result, err := deps.Workspace.BuildEnvironment(cmd.Context(), app.EnvironmentBuildRequest{
+				Selector: global.selector(cmd, deps),
+				Wait: app.WaitOptions{Policy: app.Wait, OnWait: func(holder *app.LockHolder) {
+					fmt.Fprintln(deps.Stderr, waitingMessage(holder))
+				}},
+				Pull: pull, Progress: deps.Stderr,
+			})
+			if err != nil {
+				return err
+			}
+			format, err := global.formatOf(result.Preferences)
+			if err != nil {
+				return err
+			}
+			return render(deps.Stdout, format, result)
+		},
+	}
+	cmd.Flags().BoolVar(&pull, "pull", false, "pull the base image, pinned by digest, if it is missing")
 	addOverrideFlags(cmd)
 	return cmd
 }

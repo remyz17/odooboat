@@ -60,6 +60,13 @@ func TestRuntimeAndBusyExitCodes(t *testing.T) {
 		{fmt.Errorf("wrapped: %w", runtime.NewConnectionError(runtime.ErrUnsupported, "local", "", "ssh", "")), ExitRuntime},
 		{&state.BusyError{EnvironmentID: "x"}, ExitBusy},
 		{app.ErrState, ExitState},
+		{fmt.Errorf("base: %w", app.ErrImageNotFound), ExitImage},
+		{fmt.Errorf("base: %w", app.ErrInvalidImage), ExitImage},
+		{fmt.Errorf("%w: step failed", app.ErrImageBuild), ExitImage},
+		{fmt.Errorf("%w: 17.0", app.ErrSourceMismatch), ExitSource},
+		{fmt.Errorf("community: %w", app.ErrSourceFetch), ExitSource},
+		{fmt.Errorf("%w: community source: missing", app.ErrSourceInvalid), ExitSource},
+		{fmt.Errorf("%w: none", app.ErrSourceRequired), ExitConfig},
 	}
 	for _, tc := range cases {
 		if code := ExitCode(tc.err); code != tc.code {

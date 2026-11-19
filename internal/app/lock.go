@@ -16,7 +16,10 @@ import (
 // Operation names a stateful environment workflow in lock holder records.
 type Operation string
 
-const OperationVerify Operation = "environment verify"
+const (
+	OperationVerify Operation = "environment verify"
+	OperationBuild  Operation = "environment build"
+)
 
 type WaitPolicy string
 
@@ -48,6 +51,9 @@ type LockedEnvironment struct {
 	BindingCreated   bool
 	IdentityRecorded bool
 	Preferences      config.ResolvedPreferences
+	// Config is the configuration resolved for this operation, so workflows
+	// act on exactly what was validated.
+	Config config.ResolvedConfig
 }
 
 // withEnvironment is the single entry point of every stateful environment
@@ -111,6 +117,7 @@ func (s WorkspaceService) withEnvironment(ctx context.Context, sel Selector, op 
 		Location: location, WorkspaceID: bound.Workspace.ID, Name: name, OperationID: operationID,
 		Binding: binding, Engine: engine, EngineInfo: info,
 		BindingCreated: created, IdentityRecorded: recorded, Preferences: resolved.Config.Preferences,
+		Config: resolved.Config,
 	})
 }
 
