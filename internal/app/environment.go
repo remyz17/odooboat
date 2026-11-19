@@ -20,6 +20,7 @@ type EnvironmentShowResult struct {
 	BoundConnection   *workspace.Connection      `yaml:"boundConnection,omitempty" json:"boundConnection,omitempty"`
 	Matches           *bool                      `yaml:"matches,omitempty" json:"matches,omitempty"`
 	Engine            *workspace.EngineRecord    `yaml:"engine,omitempty" json:"engine,omitempty"`
+	Runtime           RuntimeReport              `yaml:"runtime" json:"runtime"`
 	Preferences       config.ResolvedPreferences `yaml:"-" json:"-"`
 }
 
@@ -39,7 +40,7 @@ func (s WorkspaceService) ShowEnvironment(_ context.Context, req EnvironmentShow
 	desired := connectionSnapshot(resolved.Config.RuntimeConnection)
 	result := EnvironmentShowResult{
 		WorkspaceStatus: WorkspaceStatus(inspection.Status), Environment: resolved.Config.EnvironmentName,
-		DesiredConnection: desired, Preferences: resolved.Config.Preferences,
+		DesiredConnection: desired, Runtime: runtimeReport(resolved.Config), Preferences: resolved.Config.Preferences,
 	}
 	if inspection.State == nil {
 		return result, nil
