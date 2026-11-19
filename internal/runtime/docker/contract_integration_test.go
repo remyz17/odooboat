@@ -7,6 +7,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/moby/moby/client"
 	"github.com/remyz17/odooboat/internal/runtime"
 	"github.com/remyz17/odooboat/internal/runtime/runtimetest"
 )
@@ -25,11 +26,18 @@ func TestContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtimetest.Run(t, func(ctx context.Context, t *testing.T) runtime.Engine {
+	connect := func(ctx context.Context, t *testing.T) *Engine {
 		engine, err := Connect(ctx, loc, configDir)
 		if err != nil {
 			t.Fatal(err)
 		}
 		return engine
-	})
+	}
+	runtimetest.Run(t, func(ctx context.Context, t *testing.T) runtime.Engine { return connect(ctx, t) },
+		runtimetest.Hooks{RemoveImage: func(ctx context.Context, ref string) error {
+			engine := connect(ctx, t)
+			defer engine.Close()
+			_, err := engine.client.ImageRemove(ctx, ref, client.ImageRemoveOptions{PruneChildren: true})
+			return err
+		}})
 }

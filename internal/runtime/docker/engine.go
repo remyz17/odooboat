@@ -17,7 +17,7 @@ const IdentitySource = "docker.info.id"
 const pingTimeout = 5 * time.Second
 
 // capabilities lists only the guarantees exercised by the contract suite.
-var capabilities = runtime.Capabilities{runtime.CapEngineIdentity}
+var capabilities = runtime.Capabilities{runtime.CapEngineIdentity, runtime.CapImageBuild, runtime.CapImagePull}
 
 type Engine struct {
 	alias    string
