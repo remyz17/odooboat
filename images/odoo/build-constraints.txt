@@ -1,0 +1,7 @@
+# Constraints for the isolated environments that build sdists into wheels.
+# Older pins have sdists whose setup.py imports pkg_resources, which
+# setuptools removed in version 81.
+setuptools<81
+# gevent 21.8.0 (18.0 on Python 3.10) has no Linux wheel and its Cython
+# sources use `long`, which Cython 3.1 removed.
+Cython<3.1
