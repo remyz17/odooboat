@@ -23,6 +23,11 @@ const (
 	ExitState   = 4
 	ExitRuntime = 5
 	ExitBusy    = 6
+	// ExitImage: a base image is missing or invalid, or an image build failed.
+	ExitImage = 7
+	// ExitSource: an Odoo source could not be fetched, is not a usable Odoo
+	// tree, or has the wrong series.
+	ExitSource = 8
 )
 
 // ErrUsage marks a failure of CLI syntax, the only class that prints usage text.
@@ -125,7 +130,8 @@ func ExitCode(err error) int {
 	case errors.Is(err, config.ErrNotFound),
 		errors.Is(err, config.ErrDecode),
 		errors.Is(err, config.ErrAuthored),
-		errors.Is(err, config.ErrResolved):
+		errors.Is(err, config.ErrResolved),
+		errors.Is(err, app.ErrSourceRequired):
 		return ExitConfig
 	case errors.Is(err, app.ErrState):
 		return ExitState
@@ -133,6 +139,10 @@ func ExitCode(err error) int {
 		return ExitRuntime
 	case errors.Is(err, app.ErrEnvironmentBusy):
 		return ExitBusy
+	case errors.Is(err, app.ErrImageNotFound), errors.Is(err, app.ErrInvalidImage), errors.Is(err, app.ErrImageBuild):
+		return ExitImage
+	case errors.Is(err, app.ErrSourceMismatch), errors.Is(err, app.ErrSourceFetch), errors.Is(err, app.ErrSourceInvalid):
+		return ExitSource
 	default:
 		return ExitError
 	}
