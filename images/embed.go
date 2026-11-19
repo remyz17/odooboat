@@ -4,7 +4,7 @@
 package images
 
 import (
-	_ "embed"
+	"embed"
 )
 
 // Matrix is the raw content of matrix.yaml (ADR 0008 §1).
@@ -17,3 +17,10 @@ var Matrix []byte
 //
 //go:embed bases.yaml
 var Bases []byte
+
+// Environment holds the files every environment image build context
+// includes: the Python helper, the PostgreSQL signing key, and the build
+// constraints shared with base images (ADR 0008 A3).
+//
+//go:embed helper/odooboat_helper.py pgdg.asc odoo/build-constraints.txt
+var Environment embed.FS
