@@ -24,6 +24,8 @@ var capabilities = runtime.Capabilities{
 	runtime.CapLabelsContainer, runtime.CapLabelsVolume, runtime.CapLabelsNetwork, runtime.CapLabelsFilter,
 	runtime.CapNetworkPrivate, runtime.CapNetworkNames, runtime.CapVolumePersistent, runtime.CapMountBind,
 	runtime.CapContainerExitStatus, runtime.CapContainerCopy, runtime.CapPortPublish,
+	runtime.CapLogsFollow, runtime.CapLogsFollowEnds, runtime.CapLogsBoundedSince, runtime.CapLogsSeparateStreams,
+	runtime.CapLogsSourceTimes,
 }
 
 type Engine struct {

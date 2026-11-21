@@ -224,14 +224,34 @@ func (e *Engine) ExecContainer(ctx context.Context, id string, req runtime.ExecR
 	return runtime.ExecResult{ExitCode: inspected.ExitCode}, nil
 }
 
-func (e *Engine) ContainerLogs(ctx context.Context, id string, tail int, w io.Writer) error {
-	logs, err := e.client.ContainerLogs(ctx, id, client.ContainerLogsOptions{ShowStdout: true, ShowStderr: true, Tail: strconv.Itoa(tail)})
+func (e *Engine) ContainerLogs(ctx context.Context, id string, opts runtime.LogOptions, stdout, stderr io.Writer) error {
+	options := client.ContainerLogsOptions{ShowStdout: true, ShowStderr: true, Follow: opts.Follow,
+		Timestamps: opts.Timestamps, Tail: "all"}
+	if opts.Tail >= 0 {
+		options.Tail = strconv.Itoa(opts.Tail)
+	}
+	if !opts.Since.IsZero() {
+		options.Since = fmt.Sprintf("%d.%09d", opts.Since.Unix(), opts.Since.Nanosecond())
+	}
+	logs, err := e.client.ContainerLogs(ctx, id, options)
 	if err != nil {
 		return classify(err, "logs of container %s", id)
 	}
 	defer logs.Close()
-	_, err = stdcopy.StdCopy(w, w, logs)
-	return err
+	// Closing the stream unblocks the copy when the caller stops observing.
+	stop := context.AfterFunc(ctx, func() { _ = logs.Close() })
+	defer stop()
+	// The container has no TTY, so the engine multiplexes both streams.
+	if _, err := stdcopy.StdCopy(orDiscard(stdout), orDiscard(stderr), logs); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return fmt.Errorf("read logs of container %s: %w", id, err)
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return nil
 }
 
 func (e *Engine) ListNetworks(ctx context.Context, filter runtime.LabelFilter) ([]runtime.NetworkInfo, error) {
