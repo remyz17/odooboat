@@ -140,7 +140,7 @@ func TestExecPassesExitCode(t *testing.T) {
 		t.Fatalf("exec = %+v, %v", r.result, r.err)
 	}
 	call := f.engine.sessionCalls[len(f.engine.sessionCalls)-1]
-	if call.containerID != f.engine.containers[f.name(first, runtime.RoleOdoo)].ID || !slices.Equal(call.req.Cmd, []string{"true"}) {
+	if call.containerID != f.engine.containers[f.name(first, runtime.RoleOdoo)].ID || !slices.Equal(call.req.Cmd, []string{"/opt/odooboat/bin/entrypoint", "true"}) {
 		t.Fatalf("session call = %+v", call)
 	}
 	if _, _, closed := f.engine.nextSession.recorded(); !closed {
@@ -297,5 +297,24 @@ func TestExecRequiresRunningAndCapabilities(t *testing.T) {
 	f.engine.capabilities = without(runtime.CapExecSignal)
 	if err := exec(Session{}); !errors.Is(err, ErrRuntimeUnsupported) {
 		t.Fatalf("without exec.signal: %v", err)
+	}
+}
+
+// Commands in the Odoo container run through the image's entrypoint, which
+// resolves the odoo command and sets USER (ADR 0008 A2); exec bypasses the
+// container's entrypoint otherwise.
+func TestExecRunsThroughEntrypointOnlyInOdoo(t *testing.T) {
+	f := newLifecycle(t, newResourceEngine(t), "")
+	f.mustUp()
+	for role, want := range map[runtime.Role][]string{
+		runtime.RoleOdoo:     {"/opt/odooboat/bin/entrypoint", "odoo", "--version"},
+		runtime.RolePostgres: {"odoo", "--version"},
+	} {
+		if _, err := f.service.Exec(context.Background(), ExecRequest{Selector: f.selector, Role: role, Cmd: []string{"odoo", "--version"}}); err != nil {
+			t.Fatal(err)
+		}
+		if got := f.engine.sessionCalls[len(f.engine.sessionCalls)-1].req.Cmd; !slices.Equal(got, want) {
+			t.Errorf("%s: command = %q, want %q", role, got, want)
+		}
 	}
 }

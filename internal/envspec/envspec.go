@@ -31,7 +31,10 @@ const (
 	RunDir        = "/opt/odooboat/run"
 	ConfFile      = "odoo.conf"
 	HelperPath    = "/opt/odooboat/helper/odooboat_helper.py"
-	PostgresData  = "/var/lib/postgresql/data"
+	// Entrypoint resolves the odoo command and prepares the process
+	// environment; commands executed in a running container go through it.
+	Entrypoint   = "/opt/odooboat/bin/entrypoint"
+	PostgresData = "/var/lib/postgresql/data"
 
 	// HTTPPort is Odoo's port inside the container; the host port is chosen
 	// by the engine (ADR 0009 §6).
