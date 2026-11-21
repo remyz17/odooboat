@@ -85,6 +85,24 @@ type Dependencies struct {
 	// Interrupts routes signals to exec sessions; nil means they are not
 	// forwarded and only cancel the context.
 	Interrupts Interrupts
+	// Access serves logs, exec, shell, and psql; nil means Workspace.
+	Access AccessService
+}
+
+// AccessService is the part of the workspace service that observes and
+// enters a running environment (ADR 0010).
+type AccessService interface {
+	Logs(ctx context.Context, req app.LogsRequest) error
+	Exec(ctx context.Context, req app.ExecRequest) (app.SessionResult, error)
+	Shell(ctx context.Context, req app.ShellRequest) (app.SessionResult, error)
+	Psql(ctx context.Context, req app.PsqlRequest) (app.SessionResult, error)
+}
+
+func (d Dependencies) access() AccessService {
+	if d.Access == nil {
+		return d.Workspace
+	}
+	return d.Access
 }
 
 func (d Dependencies) terminal() Terminal {
@@ -144,6 +162,7 @@ func NewRootCommand(deps Dependencies) *cobra.Command {
 	root.AddCommand(newWorkspaceCommand(deps, global))
 	root.AddCommand(newEnvironmentCommand(deps, global))
 	root.AddCommand(newUpCommand(deps, global), newDownCommand(deps, global), newStatusCommand(deps, global))
+	root.AddCommand(newLogsCommand(deps, global), newExecCommand(deps, global), newShellCommand(deps, global), newPsqlCommand(deps, global))
 	return root
 }
 
