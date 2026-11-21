@@ -100,15 +100,14 @@ func TestValidateSchemaAndEngine(t *testing.T) {
 		engine *EngineRecord
 		valid  bool
 	}{
-		{"schema 1 without engine", 1, nil, true},
-		{"schema 1 with engine", 1, &EngineRecord{Source: "docker.info.id", Value: "x"}, false},
-		{"schema 2 without engine", 2, nil, true},
-		{"schema 2 identity", 2, &EngineRecord{Source: "docker.info.id", Value: "x"}, true},
-		{"schema 2 unavailable", 2, &EngineRecord{Unavailable: true}, true},
-		{"unavailable with value", 2, &EngineRecord{Unavailable: true, Value: "x"}, false},
-		{"missing value", 2, &EngineRecord{Source: "docker.info.id"}, false},
-		{"empty record", 2, &EngineRecord{}, false},
-		{"schema 3", 3, nil, false},
+		{"without engine", 1, nil, true},
+		{"identity", 1, &EngineRecord{Source: "docker.info.id", Value: "x"}, true},
+		{"unavailable", 1, &EngineRecord{Unavailable: true}, true},
+		{"unavailable with value", 1, &EngineRecord{Unavailable: true, Value: "x"}, false},
+		{"missing value", 1, &EngineRecord{Source: "docker.info.id"}, false},
+		{"empty record", 1, &EngineRecord{}, false},
+		// ADR 0007: one schema before release, schema 2 included.
+		{"schema 2", 2, nil, false},
 		{"schema 0", 0, nil, false},
 	}
 	for _, tc := range cases {

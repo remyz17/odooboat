@@ -7,11 +7,10 @@ import (
 	"regexp"
 )
 
-// SchemaVersion is the state schema written by this binary. Schema 1 is still
-// read and is upgraded on the next mutation (ADR 0004 A1).
-const SchemaVersion = 2
-
-const minSchemaVersion = 1
+// SchemaVersion is the only state schema this binary reads and writes. It
+// stays 1 until the first public release (ADR 0007): a format change before
+// then modifies version 1 in place, and pre-release state is disposable.
+const SchemaVersion = 1
 
 var (
 	ErrState             = errors.New("workspace state operation failed")
