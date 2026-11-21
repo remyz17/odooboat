@@ -86,5 +86,52 @@ class Check(unittest.TestCase):
         self.assertTrue(any(p.startswith("pg_dump:") for p in report["problems"]))
 
 
+class Ready(unittest.TestCase):
+    def serve(self, status):
+        import http.server
+        import threading
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802
+                self.send_response(status)
+                self.end_headers()
+                self.wfile.write(b'{"status": "pass"}')
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return "http://127.0.0.1:%d/web/health" % server.server_address[1]
+
+    def test_ready(self):
+        report = helper.ready(self.serve(200))
+        self.assertEqual(report, {"protocol": 1, "ready": True, "status": 200})
+
+    def test_error_status_is_not_ready(self):
+        report = helper.ready(self.serve(503))
+        self.assertFalse(report["ready"])
+        self.assertEqual(report["status"], 503)
+
+    def test_unreachable_is_not_ready(self):
+        import socket
+
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        report = helper.ready("http://127.0.0.1:%d/web/health" % port, timeout=1)
+        self.assertFalse(report["ready"])
+        self.assertIn("error", report)
+        self.assertNotIn("status", report)
+
+    def test_exit_code(self):
+        ready, unavailable = self.serve(200), self.serve(503)
+        with mock.patch("sys.stdout"):
+            self.assertEqual(helper.main(["ready", "--url", ready]), 0)
+            self.assertEqual(helper.main(["ready", "--url", unavailable]), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
