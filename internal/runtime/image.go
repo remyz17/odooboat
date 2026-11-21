@@ -141,6 +141,8 @@ type ImageInfo struct {
 	Labels      map[string]string
 	OS          string
 	Arch        string
+	// Env is the image's default environment, as KEY=value entries.
+	Env []string
 }
 
 // pinnedRe matches a reference that names its content: name@sha256:<digest>.

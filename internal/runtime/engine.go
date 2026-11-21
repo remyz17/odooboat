@@ -34,7 +34,13 @@ const (
 	CapImageNoImplicitPull Capability = "image.no-implicit-pull"
 	CapImageBuild          Capability = "image.build"
 	CapImagePull           Capability = "image.pull"
-	CapEngineIdentity      Capability = "engine.identity"
+	// CapContainerCopy: a tar archive can be extracted into a created
+	// container before it starts (ADR 0009 §3).
+	CapContainerCopy Capability = "container.copy"
+	// CapPortPublish: a container port can be published on a host address,
+	// with the engine choosing the port (ADR 0009 §6).
+	CapPortPublish    Capability = "port.publish"
+	CapEngineIdentity Capability = "engine.identity"
 )
 
 // Capabilities is the set of guarantees an adapter declares for a connection.

@@ -27,9 +27,10 @@ type Hooks struct {
 	RemoveImage func(ctx context.Context, ref string) error
 }
 
-// PullRefEnv names a reference pinned by digest that the pull test pulls. The
-// test needs network access to a registry and is skipped, with a message,
-// when the variable is empty.
+// PullRefEnv names a reference pinned by digest, of an image with a POSIX
+// shell and busybox tools (alpine). The container tests run it and fail
+// without it; the pull test pulls it and is skipped, with a message, when the
+// variable is empty.
 const PullRefEnv = "ODOOBOAT_TEST_PULL_REF"
 
 // Run executes the contract suite against an adapter.
@@ -37,6 +38,9 @@ func Run(t *testing.T, connect Factory, hooks Hooks) {
 	t.Run("engine identity", func(t *testing.T) { testEngineIdentity(t, connect) })
 	t.Run("image inspect missing", func(t *testing.T) { testInspectMissing(t, connect) })
 	t.Run("image build and tag", func(t *testing.T) { testBuildAndTag(t, connect, hooks) })
+	t.Run("image build large context", func(t *testing.T) { testBuildLargeContext(t, connect, hooks) })
+	t.Run("container lifecycle", func(t *testing.T) { testContainerLifecycle(t, connect) })
+	t.Run("network and volume", func(t *testing.T) { testNetworkAndVolume(t, connect) })
 	t.Run("image pull", func(t *testing.T) { testPull(t, connect, hooks) })
 }
 
