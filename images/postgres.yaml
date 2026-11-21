@@ -1,0 +1,13 @@
+# PostgreSQL server images (ADR 0009 §2). Edited by hand: each entry pins the
+# multi-arch index of the official postgres:<major>-bookworm image, for every
+# major version the matrix supports. Odooboat never pulls them implicitly.
+#
+# Digests read with `docker buildx imagetools inspect` on 2026-11-19.
+schema: 1
+images:
+  "12": docker.io/library/postgres:12-bookworm@sha256:2f2a8c2a7d10862e7fba2602e304523554f9df8244c632dafe2628ccb398fb5c
+  "13": docker.io/library/postgres:13-bookworm@sha256:f0cffcc050a9f1f3c78a9968e221badc1cdd02e2ae15b1de9b12bee1ba5ea2db
+  "14": docker.io/library/postgres:14-bookworm@sha256:a54c8b1e143b22f16b0fd3e249e9297a6f08828a143ee7108b1b5ca51f352765
+  "15": docker.io/library/postgres:15-bookworm@sha256:8180c3e1b9b603d2988f937dfbe51008bad5c4b07c77f35119695c027a7315ab
+  "16": docker.io/library/postgres:16-bookworm@sha256:ce3efec6bc404f6b15ebf5d9bed6b45a9d4655aea238d7dacc3467ccb05a1175
+  "17": docker.io/library/postgres:17-bookworm@sha256:837bed18782820fe967067cb5328b02b0d9992c1be9a37ee0c9c492cfc03af3b
