@@ -194,34 +194,15 @@ func (e *Engine) RemoveContainer(ctx context.Context, id string) error {
 	return nil
 }
 
+// ExecContainer runs a command to completion. Cancelling ctx stops waiting
+// only; the command is not signalled.
 func (e *Engine) ExecContainer(ctx context.Context, id string, req runtime.ExecRequest) (runtime.ExecResult, error) {
-	created, err := e.client.ExecCreate(ctx, id, client.ExecCreateOptions{
-		User: req.User, Env: req.Env, Cmd: req.Cmd, AttachStdout: true, AttachStderr: true,
-	})
+	s, err := e.StartExec(ctx, id, req)
 	if err != nil {
-		return runtime.ExecResult{}, classify(err, "exec in container %s", id)
+		return runtime.ExecResult{}, err
 	}
-	attached, err := e.client.ExecAttach(ctx, created.ID, client.ExecAttachOptions{})
-	if err != nil {
-		return runtime.ExecResult{}, classify(err, "attach to exec in container %s", id)
-	}
-	defer attached.Close()
-	// Without a TTY the engine multiplexes both streams; stdcopy separates
-	// them as they arrive (streams are bytes, ADR 0005 §2).
-	if _, err := stdcopy.StdCopy(orDiscard(req.Stdout), orDiscard(req.Stderr), attached.Reader); err != nil {
-		if ctx.Err() != nil {
-			return runtime.ExecResult{}, ctx.Err()
-		}
-		return runtime.ExecResult{}, fmt.Errorf("read exec output in container %s: %w", id, err)
-	}
-	inspected, err := e.client.ExecInspect(ctx, created.ID, client.ExecInspectOptions{})
-	if err != nil {
-		return runtime.ExecResult{}, classify(err, "inspect exec in container %s", id)
-	}
-	if inspected.Running {
-		return runtime.ExecResult{}, fmt.Errorf("exec in container %s: output ended before the command", id)
-	}
-	return runtime.ExecResult{ExitCode: inspected.ExitCode}, nil
+	defer s.Close()
+	return s.Wait(ctx)
 }
 
 func (e *Engine) ContainerLogs(ctx context.Context, id string, opts runtime.LogOptions, stdout, stderr io.Writer) error {
