@@ -93,6 +93,20 @@ type ExecResult struct {
 	ExitCode int
 }
 
+// LogOptions bounds a log read (ADR 0010 §8).
+type LogOptions struct {
+	// Follow keeps streaming new lines (logs.follow).
+	Follow bool
+	// Tail is the number of last lines to start from; negative means all.
+	Tail int
+	// Since drops lines older than this time; zero means unbounded
+	// (logs.bounded-since).
+	Since time.Time
+	// Timestamps prefixes each line with the engine's RFC 3339 timestamp
+	// (logs.source-timestamps on Docker).
+	Timestamps bool
+}
+
 // ContainerStore is the container primitive set (ADR 0005 §2). It decides
 // nothing: replacement policy belongs to the application (ADR 0001 §4).
 type ContainerStore interface {
@@ -111,8 +125,11 @@ type ContainerStore interface {
 	// RemoveContainer removes a stopped container. It never removes volumes.
 	RemoveContainer(ctx context.Context, id string) error
 	ExecContainer(ctx context.Context, id string, req ExecRequest) (ExecResult, error)
-	// ContainerLogs writes at most the last tail lines of both streams.
-	ContainerLogs(ctx context.Context, id string, tail int, w io.Writer) error
+	// ContainerLogs writes a container's log streams, bounded by opts.
+	// Following ends with nil when the container stops (logs.follow-ends)
+	// and with the context's error when it is cancelled: cancelling stops
+	// observation only (ADR 0005 §2).
+	ContainerLogs(ctx context.Context, id string, opts LogOptions, stdout, stderr io.Writer) error
 }
 
 type NetworkInfo struct {

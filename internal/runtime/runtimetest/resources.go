@@ -265,7 +265,7 @@ func testContainerLifecycle(t *testing.T, connect Factory) {
 		t.Fatalf("exit code = %d, want 7", info.ExitCode)
 	}
 	var logs bytes.Buffer
-	if err := f.containers.ContainerLogs(ctx, exits, 5, &logs); err != nil || !strings.Contains(logs.String(), "last line") {
+	if err := f.containers.ContainerLogs(ctx, exits, runtime.LogOptions{Tail: 5}, &logs, &logs); err != nil || !strings.Contains(logs.String(), "last line") {
 		t.Fatalf("logs = %q, %v", logs.String(), err)
 	}
 }

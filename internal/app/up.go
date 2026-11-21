@@ -616,7 +616,7 @@ func waitReady(ctx context.Context, containers runtime.ContainerStore, c *envspe
 
 func notReady(ctx context.Context, containers runtime.ContainerStore, id, reason string) error {
 	var logs bytes.Buffer
-	if err := containers.ContainerLogs(ctx, id, failureLogLines, &logs); err != nil {
+	if err := containers.ContainerLogs(ctx, id, runtime.LogOptions{Tail: failureLogLines}, &logs, &logs); err != nil {
 		return fmt.Errorf("%w: %s (logs unavailable: %v)", ErrNotReady, reason, err)
 	}
 	return fmt.Errorf("%w: %s; last log lines:\n%s", ErrNotReady, reason, strings.TrimRight(logs.String(), "\n"))

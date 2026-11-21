@@ -184,8 +184,8 @@ func (e *resourceEngine) ExecContainer(_ context.Context, id string, _ runtime.E
 	return runtime.ExecResult{ExitCode: e.probeExit}, nil
 }
 
-func (e *resourceEngine) ContainerLogs(_ context.Context, _ string, _ int, w io.Writer) error {
-	_, err := io.WriteString(w, "fatal: database is gone\n")
+func (e *resourceEngine) ContainerLogs(_ context.Context, _ string, _ runtime.LogOptions, _, stderr io.Writer) error {
+	_, err := io.WriteString(stderr, "fatal: database is gone\n")
 	return err
 }
 
