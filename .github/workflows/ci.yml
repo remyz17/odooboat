@@ -58,8 +58,8 @@ jobs:
             echo "The images package must only embed files"
             exit 1
           fi
-          if go list -deps ./internal/envimage ./internal/source/... | grep -qE '/internal/runtime/[a-z]+$|github.com/moby/moby'; then
-            echo "Image planning and source acquisition must not depend on a runtime adapter"
+          if go list -deps ./internal/envimage ./internal/envspec ./internal/source/... | grep -qE '/internal/runtime/[a-z]+$|github.com/moby/moby'; then
+            echo "Image and environment planning, and source acquisition, must not depend on a runtime adapter"
             exit 1
           fi
           if go list -deps ./images/ci | grep -qE '/internal/runtime/[a-z]+$|github.com/moby/moby'; then
