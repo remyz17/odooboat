@@ -28,6 +28,11 @@ const (
 	// ExitSource: an Odoo source could not be fetched, is not a usable Odoo
 	// tree, or has the wrong series.
 	ExitSource = 8
+	// ExitConflict: a resource name is held by something odooboat does not
+	// own, an owned resource is read-only, or existing data is incompatible.
+	ExitConflict = 9
+	// ExitNotReady: a container did not become ready, or stopped.
+	ExitNotReady = 10
 )
 
 // ErrUsage marks a failure of CLI syntax, the only class that prints usage text.
@@ -103,6 +108,7 @@ func NewRootCommand(deps Dependencies) *cobra.Command {
 	root.AddCommand(newInitCommand(deps, global))
 	root.AddCommand(newWorkspaceCommand(deps, global))
 	root.AddCommand(newEnvironmentCommand(deps, global))
+	root.AddCommand(newUpCommand(deps, global), newDownCommand(deps, global), newStatusCommand(deps, global))
 	return root
 }
 
@@ -143,6 +149,10 @@ func ExitCode(err error) int {
 		return ExitImage
 	case errors.Is(err, app.ErrSourceMismatch), errors.Is(err, app.ErrSourceFetch), errors.Is(err, app.ErrSourceInvalid):
 		return ExitSource
+	case errors.Is(err, app.ErrConflict), errors.Is(err, app.ErrIncompatibleData):
+		return ExitConflict
+	case errors.Is(err, app.ErrNotReady):
+		return ExitNotReady
 	default:
 		return ExitError
 	}
