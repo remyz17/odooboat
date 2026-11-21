@@ -77,20 +77,27 @@ type ContainerInfo struct {
 // LabelFilter selects resources carrying every listed label with its value.
 type LabelFilter map[string]string
 
-// ExecRequest runs a command in a running container without a terminal.
-// Output is written to the caller's writers as it arrives.
+// ExecRequest runs a command in a running container. Output is written to
+// the caller's writers as it arrives; with a TTY, everything goes to Stdout.
 type ExecRequest struct {
-	Cmd    []string
-	User   string
-	Env    []string
+	Cmd  []string
+	User string
+	Env  []string
+	// Stdin, when set, is forwarded until EOF. Without a TTY, EOF closes the
+	// command's stdin; with one, it is not propagated (ADR 0010 §3).
+	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
+	// TTY allocates a terminal of the given initial size (exec.tty).
+	TTY  bool
+	Size TerminalSize
 }
 
 // ExecResult is the outcome of a command that ran. A non-zero exit code is a
 // result, never an error (ADR 0005 §2).
 type ExecResult struct {
 	ExitCode int
+	Streams  StreamIdentity
 }
 
 // LogOptions bounds a log read (ADR 0010 §8).

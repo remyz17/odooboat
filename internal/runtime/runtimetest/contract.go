@@ -42,6 +42,7 @@ func Run(t *testing.T, connect Factory, hooks Hooks) {
 	t.Run("container lifecycle", func(t *testing.T) { testContainerLifecycle(t, connect) })
 	t.Run("network and volume", func(t *testing.T) { testNetworkAndVolume(t, connect) })
 	t.Run("logs", func(t *testing.T) { testLogs(t, connect) })
+	t.Run("sessions", func(t *testing.T) { testSessions(t, connect) })
 	t.Run("image pull", func(t *testing.T) { testPull(t, connect, hooks) })
 }
 
