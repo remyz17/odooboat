@@ -1,0 +1,144 @@
+{
+  "network": {
+    "Name": "ob-acme-default-environment-3f9a2c1e",
+    "Labels": {
+      "odooboat.created-by": "odooboat/test",
+      "odooboat.display.environment": "default",
+      "odooboat.display.project": "acme",
+      "odooboat.environment": "3f9a2c1e-2222-4222-8222-222222222222",
+      "odooboat.operation": "33333333-3333-4333-8333-333333333333",
+      "odooboat.role": "environment",
+      "odooboat.schema": "1",
+      "odooboat.scope": "environment",
+      "odooboat.workspace": "11111111-1111-4111-8111-111111111111"
+    }
+  },
+  "odoo": {
+    "Name": "ob-acme-default-odoo-3f9a2c1e",
+    "Image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "User": "",
+    "Labels": {
+      "odooboat.created-by": "odooboat/test",
+      "odooboat.display.environment": "default",
+      "odooboat.display.project": "acme",
+      "odooboat.environment": "3f9a2c1e-2222-4222-8222-222222222222",
+      "odooboat.operation": "33333333-3333-4333-8333-333333333333",
+      "odooboat.role": "odoo",
+      "odooboat.schema": "1",
+      "odooboat.scope": "environment",
+      "odooboat.spec": "sha256:03d54c23b2dc9bee11e7f2354b50fc8a6b6ea69bf0a5a42d94eddc5b3786870d",
+      "odooboat.workspace": "11111111-1111-4111-8111-111111111111"
+    },
+    "Env": null,
+    "Cmd": [
+      "odoo",
+      "--config",
+      "/opt/odooboat/run/odoo.conf"
+    ],
+    "Network": "ob-acme-default-environment-3f9a2c1e",
+    "Mounts": [
+      {
+        "kind": "volume",
+        "source": "ob-acme-default-odoo-data-3f9a2c1e",
+        "target": "/var/lib/odoo",
+        "readOnly": false
+      },
+      {
+        "kind": "bind",
+        "source": "/work/odoo/community",
+        "target": "/opt/odoo/community",
+        "readOnly": true
+      },
+      {
+        "kind": "bind",
+        "source": "/work/odoo/enterprise",
+        "target": "/opt/odoo/enterprise",
+        "readOnly": true
+      },
+      {
+        "kind": "bind",
+        "source": "/work/acme/addons/core",
+        "target": "/opt/odooboat/addons/core",
+        "readOnly": true
+      }
+    ],
+    "Ports": [
+      {
+        "containerPort": 8069,
+        "hostIP": "127.0.0.1",
+        "hostPort": 0
+      }
+    ]
+  },
+  "odooHash": "sha256:03d54c23b2dc9bee11e7f2354b50fc8a6b6ea69bf0a5a42d94eddc5b3786870d",
+  "postgres": {
+    "Name": "ob-acme-default-postgres-3f9a2c1e",
+    "Image": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "User": "",
+    "Labels": {
+      "odooboat.created-by": "odooboat/test",
+      "odooboat.display.environment": "default",
+      "odooboat.display.project": "acme",
+      "odooboat.environment": "3f9a2c1e-2222-4222-8222-222222222222",
+      "odooboat.operation": "33333333-3333-4333-8333-333333333333",
+      "odooboat.role": "postgres",
+      "odooboat.schema": "1",
+      "odooboat.scope": "environment",
+      "odooboat.spec": "sha256:7e95334076a612af01b9788ef697db26dc9c7c29d7b8d32c4cfd1bdbd44e8656",
+      "odooboat.workspace": "11111111-1111-4111-8111-111111111111"
+    },
+    "Env": [
+      "POSTGRES_USER=odoo",
+      "POSTGRES_PASSWORD=odoo",
+      "POSTGRES_DB=postgres"
+    ],
+    "Cmd": null,
+    "Network": "ob-acme-default-environment-3f9a2c1e",
+    "Mounts": [
+      {
+        "kind": "volume",
+        "source": "ob-acme-default-postgres-data-3f9a2c1e",
+        "target": "/var/lib/postgresql/data",
+        "readOnly": false
+      }
+    ],
+    "Ports": null
+  },
+  "postgresHash": "sha256:7e95334076a612af01b9788ef697db26dc9c7c29d7b8d32c4cfd1bdbd44e8656",
+  "volumes": [
+    {
+      "Name": "ob-acme-default-postgres-data-3f9a2c1e",
+      "Role": "postgres-data",
+      "Labels": {
+        "odooboat.created-by": "odooboat/test",
+        "odooboat.data.postgres-major": "16",
+        "odooboat.display.environment": "default",
+        "odooboat.display.project": "acme",
+        "odooboat.environment": "3f9a2c1e-2222-4222-8222-222222222222",
+        "odooboat.operation": "33333333-3333-4333-8333-333333333333",
+        "odooboat.role": "postgres-data",
+        "odooboat.schema": "1",
+        "odooboat.scope": "environment",
+        "odooboat.workspace": "11111111-1111-4111-8111-111111111111"
+      },
+      "PostgresMajor": 16
+    },
+    {
+      "Name": "ob-acme-default-odoo-data-3f9a2c1e",
+      "Role": "odoo-data",
+      "Labels": {
+        "odooboat.created-by": "odooboat/test",
+        "odooboat.display.environment": "default",
+        "odooboat.display.project": "acme",
+        "odooboat.environment": "3f9a2c1e-2222-4222-8222-222222222222",
+        "odooboat.operation": "33333333-3333-4333-8333-333333333333",
+        "odooboat.role": "odoo-data",
+        "odooboat.schema": "1",
+        "odooboat.scope": "environment",
+        "odooboat.workspace": "11111111-1111-4111-8111-111111111111"
+      },
+      "PostgresMajor": 0
+    }
+  ],
+  "warnings": null
+}
