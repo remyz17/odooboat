@@ -33,6 +33,10 @@ type resourceEngine struct {
 	probeExit   int
 	exitOnStart runtime.Role
 	logCalls    []logCall
+	// sessionCalls records started exec sessions; nextSession is the session
+	// the next StartExec returns, one exiting 0 when nil.
+	sessionCalls []sessionCall
+	nextSession  *fakeSession
 }
 
 type logCall struct {
