@@ -66,6 +66,12 @@ jobs:
             echo "images/ci must read image inspection from stdin, not through a runtime adapter"
             exit 1
           fi
+          # Terminal handling stays in the CLI (ADR 0010 §8).
+          if go list -f '{{.ImportPath}}: {{join .Imports " "}}' ./... | grep 'golang.org/x/term' \
+            | grep -vE '^github.com/remyz17/odooboat/internal/cli:'; then
+            echo "golang.org/x/term must remain inside internal/cli"
+            exit 1
+          fi
           if go list -deps ./internal/app ./internal/cli | grep -q '/internal/runtime/docker$'; then
             echo "Application and CLI packages must reach runtimes only through internal/runtime"
             exit 1

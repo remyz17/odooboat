@@ -6,8 +6,6 @@ package main
 import (
 	"context"
 	"os"
-	"os/signal"
-	"syscall"
 
 	"github.com/remyz17/odooboat/internal/app"
 	"github.com/remyz17/odooboat/internal/cli"
@@ -18,7 +16,9 @@ import (
 )
 
 func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	// Signals cancel the command, unless an exec session captures them to
+	// forward them (ADR 0010 §7).
+	ctx, interrupts, stop := cli.WatchSignals(context.Background())
 	defer stop()
 
 	workingDir, err := os.Getwd()
@@ -31,5 +31,6 @@ func main() {
 	os.Exit(cli.Run(ctx, os.Args[1:], cli.Dependencies{
 		Config: app.NewConfigService(), Workspace: app.NewWorkspaceService(store, store, runtimes, cli.Version),
 		Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr, WorkingDir: workingDir,
+		Terminal: cli.NewTerminal(os.Stdin, os.Stdout), Interrupts: interrupts,
 	}))
 }

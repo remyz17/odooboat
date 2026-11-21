@@ -7,6 +7,7 @@ require (
 	github.com/moby/moby/api v1.56.1
 	github.com/moby/moby/client v0.6.1
 	github.com/spf13/cobra v1.10.2
+	golang.org/x/term v0.32.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
