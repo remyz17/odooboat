@@ -11,7 +11,6 @@ import (
 	"github.com/remyz17/odooboat/internal/config"
 	"github.com/remyz17/odooboat/internal/envspec"
 	"github.com/remyz17/odooboat/internal/runtime"
-	"github.com/remyz17/odooboat/internal/workspace"
 )
 
 type DownRequest struct {
@@ -149,57 +148,34 @@ type StatusResult struct {
 // Status observes the environment's resources without the lock and without
 // changing anything (ADR 0009 §8).
 func (s WorkspaceService) Status(ctx context.Context, req StatusRequest) (StatusResult, error) {
-	resolved, err := config.Resolve(req.Selector.options())
+	o, err := s.observeBinding(req.Selector)
 	if err != nil {
 		return StatusResult{}, err
 	}
-	cfg := resolved.Config
+	cfg := o.cfg
 	result := StatusResult{Environment: cfg.EnvironmentName, Preferences: cfg.Preferences, Resources: []ResourceReport{}, Orphans: []ResourceReport{}}
 	if cfg.Odoo.MasterPassword.IsZero() {
 		result.Warnings = append(result.Warnings, "no masterPassword is configured: Odoo's database manager uses its default master password")
 	}
-	location, err := workspace.Locate(resolved.Sources.ProjectPath)
-	if err != nil {
-		return result, err
-	}
-	inspection, err := workspace.Inspect(s.store, location)
-	if err != nil {
-		return result, err
-	}
-	if inspection.State == nil {
+	if !o.bound {
 		return result, nil
 	}
-	binding, ok := inspection.State.Environments[cfg.EnvironmentName]
-	if !ok {
-		return result, nil
-	}
+	binding := o.binding
 	result.Bound, result.EnvironmentID = true, binding.ID
 
-	engine, err := s.runtimes.Connect(ctx, runtime.Locator{Alias: binding.Connection.Alias, Kind: binding.Connection.Kind,
-		Context: binding.Connection.Context, Socket: binding.Connection.Socket})
+	engine, err := s.connectBinding(ctx, o)
 	if err != nil {
 		return result, err
 	}
 	defer engine.Close()
-	info, err := engine.Info(ctx)
-	if err != nil {
-		return result, err
-	}
-	// Resources listed on another engine would be misleading: the recorded
-	// identity must match, as for any operation (ADR 0004 A1).
-	if recorded := binding.Engine; recorded != nil && !recorded.Unavailable && engine.Capabilities().Has(runtime.CapEngineIdentity) &&
-		(recorded.Source != info.Identity.Source || recorded.Value != info.Identity.Value) {
-		return result, fmt.Errorf("%w: environment %q was bound to engine %s=%s but the connection reaches %s=%s",
-			workspace.ErrBindingConflict, cfg.EnvironmentName, recorded.Source, recorded.Value, info.Identity.Source, info.Identity.Value)
-	}
 	stores, err := lifecycleStores(LockedEnvironment{Engine: engine, Binding: binding}, runtime.CapLabelsFilter)
 	if err != nil {
 		return result, err
 	}
 
-	workspaceID := inspection.State.Workspace.ID
+	workspaceID := o.workspaceID
 	known := map[string]bool{}
-	for _, b := range inspection.State.Environments {
+	for _, b := range o.state.Environments {
 		known[b.ID] = true
 	}
 	running := map[runtime.Role]bool{}
