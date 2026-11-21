@@ -10,11 +10,13 @@ import (
 	"github.com/remyz17/odooboat/internal/runtime"
 )
 
-// TerminalSize and Signal are re-exported so the CLI does not depend on the
-// runtime package.
+// Runtime types used in requests are re-exported so the CLI does not depend
+// on the runtime package.
 type (
 	TerminalSize = runtime.TerminalSize
 	Signal       = runtime.Signal
+	Role         = runtime.Role
+	LogOptions   = runtime.LogOptions
 )
 
 const (
@@ -22,6 +24,9 @@ const (
 	SignalTerm = runtime.SignalTerm
 	SignalHup  = runtime.SignalHup
 	SignalQuit = runtime.SignalQuit
+
+	RoleOdoo     = runtime.RoleOdoo
+	RolePostgres = runtime.RolePostgres
 )
 
 // ErrTerminationUnconfirmed: the session lost its client and the remote
