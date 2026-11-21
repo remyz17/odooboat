@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"strings"
 	"time"
 
 	"github.com/moby/moby/client"
@@ -17,7 +19,12 @@ const IdentitySource = "docker.info.id"
 const pingTimeout = 5 * time.Second
 
 // capabilities lists only the guarantees exercised by the contract suite.
-var capabilities = runtime.Capabilities{runtime.CapEngineIdentity, runtime.CapImageBuild, runtime.CapImagePull}
+var capabilities = runtime.Capabilities{
+	runtime.CapEngineIdentity, runtime.CapImageBuild, runtime.CapImagePull, runtime.CapImageNoImplicitPull,
+	runtime.CapLabelsContainer, runtime.CapLabelsVolume, runtime.CapLabelsNetwork, runtime.CapLabelsFilter,
+	runtime.CapNetworkPrivate, runtime.CapNetworkNames, runtime.CapVolumePersistent, runtime.CapMountBind,
+	runtime.CapContainerExitStatus, runtime.CapContainerCopy, runtime.CapPortPublish,
+}
 
 type Engine struct {
 	alias    string
@@ -34,7 +41,7 @@ func Connect(ctx context.Context, loc runtime.Locator, configDir string) (*Engin
 	if err != nil {
 		return nil, err
 	}
-	cli, err := client.New(client.WithHost(endpoint))
+	cli, err := client.New(client.WithHost(endpoint), client.WithHTTPRequestHook(expectContinue))
 	if err != nil {
 		return nil, runtime.NewConnectionError(runtime.ErrUnavailable, loc.Alias, endpoint,
 			fmt.Sprintf("create Docker client: %v", err), "")
@@ -46,6 +53,18 @@ func Connect(ctx context.Context, loc runtime.Locator, configDir string) (*Engin
 		return nil, unavailable(loc.Alias, endpoint, err)
 	}
 	return &Engine{alias: loc.Alias, endpoint: endpoint, client: cli}, nil
+}
+
+// expectContinue asks the engine to accept a build context before it is
+// sent. Without it, the engine stops reading a streamed context once it no
+// longer fits in the socket buffers and the build hangs at "load remote
+// build context"; curl adds the header to large uploads and is unaffected
+// (spike docker-build-sdk, large contexts). Other requests are unchanged.
+func expectContinue(r *http.Request) error {
+	if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/build") {
+		r.Header.Set("Expect", "100-continue")
+	}
+	return nil
 }
 
 // Connector connects Docker locators. An empty ConfigDir means DefaultConfigDir.

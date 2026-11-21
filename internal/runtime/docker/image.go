@@ -35,7 +35,7 @@ func (e *Engine) InspectImage(ctx context.Context, ref string) (runtime.ImageInf
 	}
 	info := runtime.ImageInfo{ID: result.ID, RepoDigests: result.RepoDigests, OS: result.Os, Arch: result.Architecture}
 	if result.Config != nil {
-		info.Labels = result.Config.Labels
+		info.Labels, info.Env = result.Config.Labels, result.Config.Env
 	}
 	return info, nil
 }
