@@ -7,6 +7,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/remyz17/odooboat/internal/envspec"
 	"github.com/remyz17/odooboat/internal/runtime"
 )
 
@@ -99,6 +100,11 @@ func (b boundEnvironment) exec(ctx context.Context, role runtime.Role, req runti
 	c, err := b.running(ctx, role)
 	if err != nil {
 		return SessionResult{}, err
+	}
+	if role == runtime.RoleOdoo {
+		// An exec bypasses the container's entrypoint, which resolves the
+		// odoo command and sets USER (ADR 0008 A2).
+		req.Cmd = append([]string{envspec.Entrypoint}, req.Cmd...)
 	}
 	return runSession(ctx, store, c.ID, req, s)
 }
