@@ -37,6 +37,10 @@ type resourceEngine struct {
 	// the next StartExec returns, one exiting 0 when nil.
 	sessionCalls []sessionCall
 	nextSession  *fakeSession
+	// execCalls records non-interactive execs other than readiness probes;
+	// execOutput answers them, readiness probes answering probeExit when nil.
+	execCalls  []sessionCall
+	execOutput func(runtime.ExecRequest) (string, int)
 }
 
 type logCall struct {
@@ -192,11 +196,25 @@ func (e *resourceEngine) RemoveContainer(_ context.Context, id string) error {
 	return nil
 }
 
-func (e *resourceEngine) ExecContainer(_ context.Context, id string, _ runtime.ExecRequest) (runtime.ExecResult, error) {
+func (e *resourceEngine) ExecContainer(_ context.Context, id string, req runtime.ExecRequest) (runtime.ExecResult, error) {
 	if c := e.byID(id); c == nil || c.State != runtime.ContainerRunning {
 		return runtime.ExecResult{}, fmt.Errorf("container %s is not running", id)
 	}
-	return runtime.ExecResult{ExitCode: e.probeExit}, nil
+	if e.execOutput == nil {
+		return runtime.ExecResult{ExitCode: e.probeExit}, nil
+	}
+	out, code := e.execOutput(req)
+	if !slices.Contains(req.Cmd, "pg_isready") && !slices.Contains(req.Cmd, "ready") {
+		e.execCalls = append(e.execCalls, sessionCall{containerID: id, req: req})
+	}
+	w := req.Stdout
+	if code != 0 {
+		w = req.Stderr
+	}
+	if w != nil {
+		_, _ = io.WriteString(w, out)
+	}
+	return runtime.ExecResult{ExitCode: code}, nil
 }
 
 func (e *resourceEngine) ContainerLogs(_ context.Context, id string, opts runtime.LogOptions, _, stderr io.Writer) error {
