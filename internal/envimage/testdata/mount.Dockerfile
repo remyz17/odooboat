@@ -60,8 +60,13 @@ RUN --mount=type=bind,from=builder,source=/wheels,target=/tmp/odooboat/wheels \
         --find-links /tmp/odooboat/wheels \
         --requirement /opt/odooboat/environment/requirements/community.txt
 
+# Directories first: COPY --chmod would give its own mode to the parent it
+# creates, leaving it untraversable for the execution user. run/ receives the
+# generated odoo.conf of each container before it starts (ADR 0009 §3).
+RUN install -d -m 0755 /opt/odooboat/helper /opt/odooboat/run
 COPY --chmod=0644 helper/odooboat_helper.py /opt/odooboat/helper/odooboat_helper.py
 
-RUN python -I /opt/odooboat/helper/odooboat_helper.py check --series 18.0 --postgres-major 16
-
+# The check runs as the execution user, so a file it cannot read fails the
+# build instead of the first up.
 USER 1000:1000
+RUN python -I /opt/odooboat/helper/odooboat_helper.py check --series 18.0 --postgres-major 16
