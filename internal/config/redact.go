@@ -1,6 +1,9 @@
 package config
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 // RedactedPlaceholder replaces every secret value in output, provenance and errors.
 const RedactedPlaceholder = "<redacted>"
@@ -39,10 +42,32 @@ func newLiteralSecret(value string) ResolvedSecret {
 
 func (s ResolvedSecret) IsZero() bool { return s.Kind == SecretKindNone }
 
-// Value exposes the authored literal. Credential resolution for env-backed
-// secrets is deferred to a later slice.
+// Value exposes the authored literal. Env-backed secrets are read by Resolve,
+// at the moment an operation needs them.
 func (s ResolvedSecret) Value() (string, bool) {
 	return s.value, s.Kind == SecretKindLiteral
+}
+
+// Resolve returns the secret's value, reading an env-backed secret through
+// lookup (os.LookupEnv in production). It reports whether a secret is
+// configured at all. A configured env secret whose variable is unset or
+// empty is an error: silently running without it would weaken what the
+// author asked for.
+func (s ResolvedSecret) Resolve(lookup func(string) (string, bool)) (string, bool, error) {
+	switch s.Kind {
+	case SecretKindNone:
+		return "", false, nil
+	case SecretKindLiteral:
+		return s.value, true, nil
+	case SecretKindEnv:
+		value, ok := lookup(s.Ref)
+		if !ok || value == "" {
+			return "", true, fmt.Errorf("%w: secret environment variable %s is not set", ErrResolved, s.Ref)
+		}
+		return value, true, nil
+	default:
+		return "", false, fmt.Errorf("%w: unknown secret kind %q", ErrResolved, s.Kind)
+	}
 }
 
 type secretView struct {
