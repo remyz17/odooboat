@@ -32,6 +32,12 @@ type resourceEngine struct {
 	// container of that role stop as soon as it starts.
 	probeExit   int
 	exitOnStart runtime.Role
+	logCalls    []logCall
+}
+
+type logCall struct {
+	id   string
+	opts runtime.LogOptions
 }
 
 var lifecycleCapabilities = runtime.Capabilities{
@@ -40,6 +46,11 @@ var lifecycleCapabilities = runtime.Capabilities{
 	runtime.CapNetworkPrivate, runtime.CapNetworkNames, runtime.CapVolumePersistent, runtime.CapMountBind,
 	runtime.CapContainerExitStatus, runtime.CapContainerCopy, runtime.CapPortPublish,
 }
+
+// accessCapabilities adds what logs and sessions need (ADR 0010 §8).
+var accessCapabilities = append(slices.Clone(lifecycleCapabilities), runtime.CapLogsFollow, runtime.CapLogsFollowEnds,
+	runtime.CapLogsBoundedSince, runtime.CapLogsSeparateStreams, runtime.CapLogsSourceTimes,
+	runtime.CapExecTTY, runtime.CapExecResize, runtime.CapExecSignal, runtime.CapExecCancelConfirmed)
 
 func postgresRef(t *testing.T, major int) string {
 	t.Helper()
@@ -57,7 +68,7 @@ func postgresRef(t *testing.T, major int) string {
 func newResourceEngine(t *testing.T) *resourceEngine {
 	t.Helper()
 	images := newImageEngine()
-	images.capabilities = lifecycleCapabilities
+	images.capabilities = accessCapabilities
 	images.add(nil, runtime.ImageInfo{ID: localBaseID, Labels: baseLabels("3.12"), Arch: "arm64"})
 	images.add([]string{postgresRef(t, 16)}, runtime.ImageInfo{ID: "sha256:" + strings.Repeat("5", 64), Arch: "arm64",
 		Env: []string{"PATH=/usr/bin", "PG_MAJOR=16"}})
@@ -184,7 +195,11 @@ func (e *resourceEngine) ExecContainer(_ context.Context, id string, _ runtime.E
 	return runtime.ExecResult{ExitCode: e.probeExit}, nil
 }
 
-func (e *resourceEngine) ContainerLogs(_ context.Context, _ string, _ runtime.LogOptions, _, stderr io.Writer) error {
+func (e *resourceEngine) ContainerLogs(_ context.Context, id string, opts runtime.LogOptions, _, stderr io.Writer) error {
+	if e.byID(id) == nil {
+		return fmt.Errorf("%w: %s", runtime.ErrNotFound, id)
+	}
+	e.logCalls = append(e.logCalls, logCall{id: id, opts: opts})
 	_, err := io.WriteString(stderr, "fatal: database is gone\n")
 	return err
 }
