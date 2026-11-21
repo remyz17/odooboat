@@ -18,6 +18,12 @@ var Matrix []byte
 //go:embed bases.yaml
 var Bases []byte
 
+// Postgres is the raw content of postgres.yaml: the PostgreSQL server image
+// of each major version, pinned by digest (ADR 0009 §2).
+//
+//go:embed postgres.yaml
+var Postgres []byte
+
 // Environment holds the files every environment image build context
 // includes: the Python helper, the PostgreSQL signing key, and the build
 // constraints shared with base images (ADR 0008 A3).

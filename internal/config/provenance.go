@@ -21,6 +21,9 @@ const (
 	// SourceBases marks a base image taken from the published bases embedded
 	// in the binary (ADR 0008 A3).
 	SourceBases SourceKind = "bases"
+	// SourcePostgresImages marks the PostgreSQL server images embedded in
+	// the binary (ADR 0009 §2). They are not configuration fields.
+	SourcePostgresImages SourceKind = "postgres-images"
 )
 
 // SourceRef locates the authored origin of an effective value.
