@@ -33,7 +33,30 @@ const (
 	ExitConflict = 9
 	// ExitNotReady: a container did not become ready, or stopped.
 	ExitNotReady = 10
+	// ExitNotRunning: the environment has no container to read or enter.
+	ExitNotRunning = 11
+	// ExitToolFailure: an exec-family command failed in Odooboat itself,
+	// before or while running the remote command (ADR 0010 §6).
+	ExitToolFailure = 125
 )
+
+// ExitStatus carries a remote command's exit code: Run exits with it and
+// prints nothing, the command having already written its own output.
+type ExitStatus struct{ Code int }
+
+func (e *ExitStatus) Error() string { return fmt.Sprintf("remote command exited %d", e.Code) }
+
+// annotationExecFamily marks exec, shell, and psql: the remote command's
+// code is returned unchanged, so every Odooboat failure exits 125 instead
+// of a code a remote command could also return (ADR 0010 §6).
+const annotationExecFamily = "odooboat.exec-family"
+
+func markExecFamily(cmd *cobra.Command) {
+	if cmd.Annotations == nil {
+		cmd.Annotations = map[string]string{}
+	}
+	cmd.Annotations[annotationExecFamily] = "true"
+}
 
 // ErrUsage marks a failure of CLI syntax, the only class that prints usage text.
 var ErrUsage = errors.New("invalid usage")
@@ -57,6 +80,18 @@ type Dependencies struct {
 	Stdout     io.Writer
 	Stderr     io.Writer
 	WorkingDir string
+	// Terminal is the local terminal; nil means none (no TTY is allocated).
+	Terminal Terminal
+	// Interrupts routes signals to exec sessions; nil means they are not
+	// forwarded and only cancel the context.
+	Interrupts Interrupts
+}
+
+func (d Dependencies) terminal() Terminal {
+	if d.Terminal == nil {
+		return noTerminal{}
+	}
+	return d.Terminal
 }
 
 type globalFlags struct {
@@ -113,18 +148,28 @@ func NewRootCommand(deps Dependencies) *cobra.Command {
 }
 
 func Run(ctx context.Context, args []string, deps Dependencies) int {
-	root := NewRootCommand(deps)
-	root.SetArgs(args)
+	return runRoot(ctx, NewRootCommand(deps), args, deps)
+}
 
-	if err := root.ExecuteContext(ctx); err != nil {
-		var usage *UsageError
-		if errors.As(err, &usage) && usage.Cmd != nil {
-			fmt.Fprint(deps.Stderr, usage.Cmd.UsageString())
-		}
-		fmt.Fprintln(deps.Stderr, "odooboat:", err)
-		return ExitCode(err)
+func runRoot(ctx context.Context, root *cobra.Command, args []string, deps Dependencies) int {
+	root.SetArgs(args)
+	cmd, err := root.ExecuteContextC(ctx)
+	if err == nil {
+		return ExitOK
 	}
-	return ExitOK
+	var status *ExitStatus
+	if errors.As(err, &status) {
+		return status.Code
+	}
+	var usage *UsageError
+	if errors.As(err, &usage) && usage.Cmd != nil {
+		fmt.Fprint(deps.Stderr, usage.Cmd.UsageString())
+	}
+	fmt.Fprintln(deps.Stderr, "odooboat:", err)
+	if cmd != nil && cmd.Annotations[annotationExecFamily] != "" {
+		return ExitToolFailure
+	}
+	return ExitCode(err)
 }
 
 func ExitCode(err error) int {
@@ -153,6 +198,8 @@ func ExitCode(err error) int {
 		return ExitConflict
 	case errors.Is(err, app.ErrNotReady):
 		return ExitNotReady
+	case errors.Is(err, app.ErrNotRunning):
+		return ExitNotRunning
 	default:
 		return ExitError
 	}
