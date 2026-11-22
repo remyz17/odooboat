@@ -102,8 +102,8 @@ func (ConfigService) Explain(_ context.Context, req ExplainRequest) (ExplainResu
 	entry, known := result.Provenance.Lookup(req.Field)
 	value, found := result.Config.Lookup(req.Field)
 	if !known && !found {
-		return ExplainResult{}, fmt.Errorf("%w: unknown field %q; run \"odooboat config show\" to list the resolved fields",
-			config.ErrResolved, req.Field)
+		return ExplainResult{}, WithHint(fmt.Errorf("%w: unknown field %q", config.ErrResolved, req.Field),
+			`run "odooboat config show" to list the resolved fields`)
 	}
 
 	return ExplainResult{

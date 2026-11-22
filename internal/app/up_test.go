@@ -481,7 +481,7 @@ func TestUpPostgresImage(t *testing.T) {
 	delete(engine.images, ref)
 	engine.pullable[ref] = pulled
 	f := newLifecycle(t, engine, "")
-	if _, err := f.up(false); !errors.Is(err, ErrImageNotFound) || !strings.Contains(err.Error(), "--pull") || engine.builds != 0 {
+	if _, err := f.up(false); !errors.Is(err, ErrImageNotFound) || Hint(err) != "rerun with --pull" || engine.builds != 0 {
 		t.Fatalf("without --pull: %v (builds %d)", err, engine.builds)
 	}
 	result, err := f.up(true)

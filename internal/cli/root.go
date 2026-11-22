@@ -185,6 +185,9 @@ func runRoot(ctx context.Context, root *cobra.Command, args []string, deps Depen
 		fmt.Fprint(deps.Stderr, usage.Cmd.UsageString())
 	}
 	fmt.Fprintln(deps.Stderr, "odooboat:", err)
+	if hint := app.Hint(err); hint != "" {
+		fmt.Fprintln(deps.Stderr, "hint:", hint)
+	}
 	if cmd != nil && cmd.Annotations[annotationExecFamily] != "" {
 		return ExitToolFailure
 	}

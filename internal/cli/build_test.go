@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/remyz17/odooboat/internal/app"
 	"github.com/remyz17/odooboat/internal/runtime"
 	"gopkg.in/yaml.v3"
 )
@@ -180,7 +181,7 @@ func TestEnvironmentBuildPullFlag(t *testing.T) {
 	args := append(append([]string{}, base...), "environment", "build", "--output", "json")
 
 	refused := executeWith(t, imageStubConnector{engine}, root, args...)
-	if ExitCode(refused.err) != ExitImage || !strings.Contains(refused.err.Error(), "--pull") || engine.pulls != 0 || refused.stdout != "" {
+	if ExitCode(refused.err) != ExitImage || app.Hint(refused.err) != "rerun with --pull" || engine.pulls != 0 || refused.stdout != "" {
 		t.Fatalf("without --pull: err = %v (exit %d), pulls %d, stdout %q", refused.err, ExitCode(refused.err), engine.pulls, refused.stdout)
 	}
 
