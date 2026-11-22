@@ -1,0 +1,22 @@
+waiting for the environment lock held by "up" (pid 4242 on laptop since 09:59:00)
+waiting for the environment lock held by an unknown process
+build image odooboat/environment:abc
+build image odooboat/environment:abc: reused (0.4s)
+pull image postgres:16
+pull image postgres:16: done (2.5s)
+build image odooboat/environment:def
+  [3/5] RUN pip install | Collecting nope
+  [3/5] RUN pip install | ERROR: no matching distribution
+build build-step [3/5] RUN pip install: failed (2.0s)
+build image odooboat/environment:def: failed (2.0s)
+create container ob-shop-dev-odoo-1a2b3c4d (odoo)
+wait container ob-shop-dev-odoo-1a2b3c4d (odoo)
+wait container ob-shop-dev-odoo-1a2b3c4d (odoo): done (1m30s)
+create container ob-shop-dev-odoo-1a2b3c4d (odoo): done (1m30s)
+using database "shop"
+warning: resize failed: no such exec
+warning: no masterPassword is configured
+Usage:
+  odooboat environment build [flags]
+error: image build failed: exit code: 1
+hint: rerun with --pull
