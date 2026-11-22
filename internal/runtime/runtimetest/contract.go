@@ -141,8 +141,10 @@ func testBuildAndTag(t *testing.T, connect Factory, hooks Hooks) {
 		inspected.Labels["odooboat.image.request-label"] != label {
 		t.Fatalf("inspected = %+v, built %s", inspected, built.ID)
 	}
-	if len(progress.all()) == 0 {
-		t.Error("build reported no progress")
+	reports := progress.all()
+	CheckProgress(t, reports)
+	if !slices.ContainsFunc(reports, func(p runtime.Progress) bool { return p.Kind == runtime.ProgressVertex }) {
+		t.Errorf("build reported no vertex:\n%s", progress.String())
 	}
 
 	if err := store.TagImage(ctx, built.ID, alias); err != nil {
@@ -162,8 +164,15 @@ func testBuildAndTag(t *testing.T, connect Factory, hooks Hooks) {
 	_ = tw.WriteHeader(&tar.Header{Name: "Dockerfile", Mode: 0o644, Size: int64(len(content))})
 	_, _ = tw.Write([]byte(content))
 	_ = tw.Close()
-	if _, err := builder.BuildImage(ctx, runtime.BuildRequest{Context: failing}); !errors.Is(err, runtime.ErrImageBuild) {
+	var failed progressLog
+	if _, err := builder.BuildImage(ctx, runtime.BuildRequest{Context: failing, Progress: failed.report}); !errors.Is(err, runtime.ErrImageBuild) {
 		t.Fatalf("failing build: err = %v, want ErrImageBuild", err)
+	}
+	CheckProgress(t, failed.all())
+	if !slices.ContainsFunc(failed.all(), func(p runtime.Progress) bool {
+		return p.Kind == runtime.ProgressVertex && p.State == runtime.ProgressFailed
+	}) {
+		t.Errorf("failing build reported no failed vertex:\n%s", failed.String())
 	}
 }
 
