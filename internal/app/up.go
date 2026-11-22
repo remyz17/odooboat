@@ -284,8 +284,8 @@ func preparePostgres(ctx context.Context, env LockedEnvironment, store runtime.I
 	case !errors.Is(err, runtime.ErrImageNotFound):
 		return image, err
 	case !pull:
-		return image, fmt.Errorf("%w: PostgreSQL image %s is not present in runtime %q; rerun with --pull to pull it",
-			ErrImageNotFound, ref, env.Binding.Connection.Alias)
+		return image, WithHint(fmt.Errorf("%w: PostgreSQL image %s is not present in runtime %q",
+			ErrImageNotFound, ref, env.Binding.Connection.Alias), "rerun with --pull")
 	default:
 		fmt.Fprintf(progress, "pulling PostgreSQL image %s\n", ref)
 		if err := store.PullImage(ctx, ref, textProgress(progress)); err != nil {
@@ -378,9 +378,9 @@ func owned(kind runtime.ResourceType, name string, labels map[string]string, rol
 	switch claim.State {
 	case runtime.ClaimValid:
 	case runtime.ClaimUnmanaged:
-		return runtime.Ownership{}, fmt.Errorf("%w: %s %s exists but is not managed by odooboat; rename or remove it", ErrConflict, kind, name)
+		return runtime.Ownership{}, WithHint(fmt.Errorf("%w: %s %s exists but is not managed by odooboat", ErrConflict, kind, name), "rename or remove it")
 	case runtime.ClaimNewerSchema, runtime.ClaimRequiresUnknown:
-		return runtime.Ownership{}, fmt.Errorf("%w: %s %s was written by a newer odooboat and is read-only; upgrade odooboat", ErrConflict, kind, name)
+		return runtime.Ownership{}, WithHint(fmt.Errorf("%w: %s %s was written by a newer odooboat and is read-only", ErrConflict, kind, name), "upgrade odooboat")
 	default:
 		return runtime.Ownership{}, fmt.Errorf("%w: %s %s has malformed odooboat labels and is never mutated: %v", ErrConflict, kind, name, claim.Err)
 	}
@@ -405,9 +405,9 @@ func checkVolume(v envspec.Volume, labels map[string]string, id envspec.Identity
 		return fmt.Errorf("%w: volume %s records no PostgreSQL major version, so its cluster cannot be checked against PostgreSQL %d",
 			ErrIncompatibleData, v.Name, v.PostgresMajor)
 	case ownership.PostgresMajor != v.PostgresMajor:
-		return fmt.Errorf("%w: volume %s holds a PostgreSQL %d cluster and the environment uses PostgreSQL %d; "+
-			"set postgres back to %d, or migrate the data first (not supported yet)",
-			ErrIncompatibleData, v.Name, ownership.PostgresMajor, v.PostgresMajor, ownership.PostgresMajor)
+		return WithHint(fmt.Errorf("%w: volume %s holds a PostgreSQL %d cluster and the environment uses PostgreSQL %d",
+			ErrIncompatibleData, v.Name, ownership.PostgresMajor, v.PostgresMajor),
+			fmt.Sprintf("set postgres back to %d, or migrate the data first (not supported yet)", ownership.PostgresMajor))
 	}
 	return nil
 }
@@ -632,7 +632,11 @@ func partial(err error, done []ResourceReport) error {
 	for i, r := range done {
 		parts[i] = r.Name + " " + r.Action
 	}
-	return fmt.Errorf("%w\ncompleted before the failure: %s; run up again once the cause is fixed", err, strings.Join(parts, ", "))
+	err = fmt.Errorf("%w\ncompleted before the failure: %s", err, strings.Join(parts, ", "))
+	if Hint(err) == "" {
+		err = WithHint(err, "run odooboat up again once the cause is fixed")
+	}
+	return err
 }
 
 func joinInts(values []int) string {

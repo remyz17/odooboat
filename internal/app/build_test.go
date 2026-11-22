@@ -183,7 +183,7 @@ func TestBuildEnvironmentPullsOnlyWhenAllowed(t *testing.T) {
 	service, selector, _ := buildFixture(t, engine, communityLines(t, pinnedBase, "community-18.0"))
 
 	_, err := build(service, selector, false)
-	if !errors.Is(err, ErrImageNotFound) || !strings.Contains(err.Error(), "--pull") || engine.pulls != 0 || engine.builds != 0 {
+	if !errors.Is(err, ErrImageNotFound) || Hint(err) != "rerun with --pull" || engine.pulls != 0 || engine.builds != 0 {
 		t.Fatalf("without --pull: err = %v, pulls %d, builds %d", err, engine.pulls, engine.builds)
 	}
 	result, err := build(service, selector, true)

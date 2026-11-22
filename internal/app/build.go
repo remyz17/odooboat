@@ -110,12 +110,12 @@ func (s WorkspaceService) BuildEnvironment(ctx context.Context, req EnvironmentB
 
 func requireBuildable(cfg config.ResolvedConfig) error {
 	if cfg.Odoo.Source.Community == nil {
-		return fmt.Errorf("%w: environment %q declares no community source; set project.odoo.source.community to {path: ...} or {git: ..., commit: ...}",
-			ErrSourceRequired, cfg.EnvironmentName)
+		return WithHint(fmt.Errorf("%w: environment %q declares no community source", ErrSourceRequired, cfg.EnvironmentName),
+			"set project.odoo.source.community to {path: ...} or {git: ..., commit: ...}")
 	}
 	if cfg.BaseImage == "" {
-		return fmt.Errorf("%w: no published base image for Odoo %s with Python %s; set baseImage to an image pinned by digest or a local image ID",
-			config.ErrResolved, cfg.OdooVersion, cfg.Python)
+		return WithHint(fmt.Errorf("%w: no published base image for Odoo %s with Python %s", config.ErrResolved, cfg.OdooVersion, cfg.Python),
+			"set baseImage to an image pinned by digest or a local image ID")
 	}
 	return nil
 }
@@ -241,8 +241,8 @@ func prepareBase(ctx context.Context, env LockedEnvironment, store runtime.Image
 	case local:
 		return BuildBase{}, "", fmt.Errorf("%w: local base image %s is not present in runtime %q", ErrImageNotFound, ref, env.Binding.Connection.Alias)
 	case !pull:
-		return BuildBase{}, "", fmt.Errorf("%w: base image %s is not present in runtime %q; rerun with --pull to pull it",
-			ErrImageNotFound, ref, env.Binding.Connection.Alias)
+		return BuildBase{}, "", WithHint(fmt.Errorf("%w: base image %s is not present in runtime %q",
+			ErrImageNotFound, ref, env.Binding.Connection.Alias), "rerun with --pull")
 	default:
 		if !env.Engine.Capabilities().Has(runtime.CapImagePull) {
 			return BuildBase{}, "", fmt.Errorf("%w: runtime connection %q cannot pull images", ErrRuntimeUnsupported, env.Binding.Connection.Alias)

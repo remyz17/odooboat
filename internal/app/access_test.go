@@ -48,7 +48,7 @@ func TestAccessStoppedContainer(t *testing.T) {
 	}
 	defer release()
 	_, err = bound.running(context.Background(), runtime.RoleOdoo)
-	if !errors.Is(err, ErrNotRunning) || !strings.Contains(err.Error(), "exited") || !strings.Contains(err.Error(), "odooboat up") {
+	if !errors.Is(err, ErrNotRunning) || !strings.Contains(err.Error(), "exited") || Hint(err) != "run odooboat up; odooboat logs odoo shows why it stopped" {
 		t.Fatalf("running(odoo) = %v, want ErrNotRunning mentioning exited and odooboat up", err)
 	}
 	if _, err := f.logs(runtime.RoleOdoo, runtime.LogOptions{Tail: 5}); err != nil {
@@ -62,14 +62,14 @@ func TestAccessAfterDown(t *testing.T) {
 	if _, err := f.service.Down(context.Background(), DownRequest{Selector: f.selector, Wait: WaitOptions{Policy: WaitFailFast}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.logs(runtime.RoleOdoo, runtime.LogOptions{Tail: 5}); !errors.Is(err, ErrNotRunning) || !strings.Contains(err.Error(), "odooboat up") {
+	if _, err := f.logs(runtime.RoleOdoo, runtime.LogOptions{Tail: 5}); !errors.Is(err, ErrNotRunning) || Hint(err) != "run odooboat up" {
 		t.Fatalf("logs after down = %v, want ErrNotRunning mentioning odooboat up", err)
 	}
 }
 
 func TestAccessUnbound(t *testing.T) {
 	f := newLifecycle(t, newResourceEngine(t), "")
-	if _, err := f.logs(runtime.RoleOdoo, runtime.LogOptions{Tail: 5}); !errors.Is(err, ErrNotRunning) || !strings.Contains(err.Error(), "odooboat up") {
+	if _, err := f.logs(runtime.RoleOdoo, runtime.LogOptions{Tail: 5}); !errors.Is(err, ErrNotRunning) || Hint(err) != "run odooboat up" {
 		t.Fatalf("logs before any up = %v, want ErrNotRunning mentioning odooboat up", err)
 	}
 }

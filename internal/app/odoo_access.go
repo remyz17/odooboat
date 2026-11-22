@@ -120,8 +120,8 @@ func (b boundEnvironment) database(ctx context.Context, requested string, mainte
 		for i, n := range names {
 			quoted[i] = fmt.Sprintf("%q", n)
 		}
-		return "", fmt.Errorf("%w: environment %q has several databases (%s); choose one with -d",
-			ErrDatabase, b.cfg.EnvironmentName, strings.Join(quoted, ", "))
+		return "", WithHint(fmt.Errorf("%w: environment %q has several databases (%s)",
+			ErrDatabase, b.cfg.EnvironmentName, strings.Join(quoted, ", ")), "choose one with -d")
 	case maintenanceOK:
 		return maintenanceDatabase, nil
 	}
@@ -129,5 +129,6 @@ func (b boundEnvironment) database(ctx context.Context, requested string, mainte
 	if odoo, err := b.running(ctx, runtime.RoleOdoo); err == nil && odooURL(odoo) != "" {
 		where = "the database manager at " + odooURL(odoo) + "/web/database/manager"
 	}
-	return "", fmt.Errorf("%w: environment %q has no database yet; create one with %s", ErrDatabase, b.cfg.EnvironmentName, where)
+	return "", WithHint(fmt.Errorf("%w: environment %q has no database yet", ErrDatabase, b.cfg.EnvironmentName),
+		"create one with "+where)
 }

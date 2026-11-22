@@ -112,7 +112,7 @@ func TestDatabaseSelection(t *testing.T) {
 	t.Run("none", func(t *testing.T) {
 		f.listing("")
 		_, err := f.shell("")
-		if !errors.Is(err, ErrDatabase) || !strings.Contains(err.Error(), "database manager") || !strings.Contains(err.Error(), first.URL) {
+		if !errors.Is(err, ErrDatabase) || !strings.Contains(Hint(err), "database manager") || !strings.Contains(Hint(err), first.URL) {
 			t.Fatalf("shell without databases = %v, want ErrDatabase naming the manager at %s", err, first.URL)
 		}
 		if _, err := f.psql(""); err != nil {

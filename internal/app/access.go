@@ -89,8 +89,8 @@ func (s WorkspaceService) connectBound(ctx context.Context, sel Selector) (bound
 		return boundEnvironment{}, nil, err
 	}
 	if !o.bound {
-		return boundEnvironment{}, nil, fmt.Errorf("%w: environment %q has never been started; run odooboat up",
-			ErrNotRunning, o.cfg.EnvironmentName)
+		return boundEnvironment{}, nil, WithHint(fmt.Errorf("%w: environment %q has never been started",
+			ErrNotRunning, o.cfg.EnvironmentName), "run odooboat up")
 	}
 	engine, err := s.connectBinding(ctx, o)
 	if err != nil {
@@ -134,8 +134,8 @@ func (b boundEnvironment) container(ctx context.Context, role runtime.Role) (run
 			return c, nil
 		}
 	}
-	return runtime.ContainerInfo{}, fmt.Errorf("%w: environment %q has no %s container; run odooboat up",
-		ErrNotRunning, b.cfg.EnvironmentName, role)
+	return runtime.ContainerInfo{}, WithHint(fmt.Errorf("%w: environment %q has no %s container",
+		ErrNotRunning, b.cfg.EnvironmentName, role), "run odooboat up")
 }
 
 // running returns this environment's container of role, which must run.
@@ -149,8 +149,9 @@ func (b boundEnvironment) running(ctx context.Context, role runtime.Role) (runti
 		if c.State == runtime.ContainerExited {
 			state += " with code " + strconv.Itoa(c.ExitCode)
 		}
-		return c, fmt.Errorf("%w: the %s container of environment %q has %s; run odooboat up (odooboat logs %s shows why)",
-			ErrNotRunning, role, b.cfg.EnvironmentName, state, role)
+		return c, WithHint(fmt.Errorf("%w: the %s container of environment %q has %s",
+			ErrNotRunning, role, b.cfg.EnvironmentName, state),
+			fmt.Sprintf("run odooboat up; odooboat logs %s shows why it stopped", role))
 	}
 	return c, nil
 }
