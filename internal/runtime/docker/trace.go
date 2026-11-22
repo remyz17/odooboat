@@ -1,15 +1,16 @@
 package docker
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
-	"strings"
+
+	"github.com/remyz17/odooboat/internal/runtime"
 )
 
 // BuildKit reports progress as base64 protobuf control.StatusResponse
-// payloads. This reader decodes the few fields the progress log needs, so the
+// payloads. This reader decodes the few fields progress reports need, so the
 // adapter does not depend on BuildKit or protobuf libraries:
 //
 //	StatusResponse { repeated Vertex vertexes = 1; repeated VertexLog logs = 3; }
@@ -73,38 +74,37 @@ func pbFields(b []byte) ([]pbField, error) {
 	return out, nil
 }
 
-type vertexState struct {
-	step                  int
-	cached, done, started bool
+// traceDecoder turns BuildKit status payloads into vertex progress.
+type traceDecoder struct {
+	emit   runtime.ProgressFunc
+	names  map[string]string
+	states map[string]runtime.ProgressState
+	order  []string
 }
 
-// traceRenderer writes a plain progress log: one line when a step starts, is
-// cached, completes, or fails, and its output lines prefixed by the step.
-type traceRenderer struct {
-	w        io.Writer
-	vertexes map[string]*vertexState
-	steps    int
+func newTraceDecoder(emit runtime.ProgressFunc) *traceDecoder {
+	return &traceDecoder{emit: emit, names: map[string]string{}, states: map[string]runtime.ProgressState{}}
 }
 
-func newTraceRenderer(w io.Writer) *traceRenderer {
-	return &traceRenderer{w: w, vertexes: map[string]*vertexState{}}
+type vertexUpdate struct {
+	digest, name, failure      string
+	cached, started, completed bool
 }
 
-func (r *traceRenderer) vertex(digest string) *vertexState {
-	v, ok := r.vertexes[digest]
-	if !ok {
-		r.steps++
-		v = &vertexState{step: r.steps}
-		r.vertexes[digest] = v
-	}
-	return v
-}
-
-func (r *traceRenderer) render(payload []byte) {
+// payload decodes one StatusResponse. Within it, starts are reported first,
+// then logs, then terminal states: BuildKit sends a vertex's last logs in the
+// same status as its completion.
+func (d *traceDecoder) payload(payload []byte) {
 	fields, err := pbFields(payload)
 	if err != nil {
 		return
 	}
+	var vertexes []vertexUpdate
+	type vertexLog struct {
+		digest string
+		msg    []byte
+	}
+	var logs []vertexLog
 	for _, field := range fields {
 		sub, err := pbFields(field.bytes)
 		if err != nil {
@@ -112,77 +112,109 @@ func (r *traceRenderer) render(payload []byte) {
 		}
 		switch field.num {
 		case 1:
-			r.renderVertex(sub)
+			if v := decodeVertex(sub); v.digest != "" {
+				vertexes = append(vertexes, v)
+			}
 		case 3:
-			r.renderLog(sub)
+			var l vertexLog
+			for _, f := range sub {
+				switch f.num {
+				case 1:
+					l.digest = string(f.bytes)
+				case 4:
+					l.msg = f.bytes
+				}
+			}
+			if l.digest != "" && len(l.msg) > 0 {
+				logs = append(logs, l)
+			}
+		}
+	}
+	for _, v := range vertexes {
+		if v.name != "" {
+			d.names[v.digest] = v.name
+		}
+		if v.started || v.cached || v.completed || v.failure != "" {
+			d.start(v.digest)
+		}
+	}
+	for _, l := range logs {
+		if d.states[l.digest].Terminal() {
+			// Output of a finished vertex belongs to the build as a whole.
+			d.emit.Report(runtime.Progress{Output: bytes.Clone(l.msg)})
+			continue
+		}
+		d.start(l.digest)
+		d.report(l.digest, runtime.ProgressRunning, bytes.Clone(l.msg))
+	}
+	for _, v := range vertexes {
+		if d.states[v.digest].Terminal() {
+			continue
+		}
+		switch {
+		case v.failure != "":
+			d.report(v.digest, runtime.ProgressFailed, nil)
+		case v.cached:
+			d.report(v.digest, runtime.ProgressCached, nil)
+		case v.completed:
+			d.report(v.digest, runtime.ProgressDone, nil)
 		}
 	}
 }
 
-func (r *traceRenderer) renderVertex(fields []pbField) {
-	var digest, name, failure string
-	var cached, started, completed bool
+func decodeVertex(fields []pbField) vertexUpdate {
+	var v vertexUpdate
 	for _, f := range fields {
 		switch f.num {
 		case 1:
-			digest = string(f.bytes)
+			v.digest = string(f.bytes)
 		case 3:
-			name = string(f.bytes)
+			v.name = string(f.bytes)
 		case 4:
-			cached = f.varint != 0
+			v.cached = f.varint != 0
 		case 5:
-			started = true
+			v.started = true
 		case 6:
-			completed = true
+			v.completed = true
 		case 7:
-			failure = string(f.bytes)
+			v.failure = string(f.bytes)
 		}
 	}
-	if digest == "" {
+	return v
+}
+
+func (d *traceDecoder) start(digest string) {
+	if _, ok := d.states[digest]; ok {
 		return
 	}
-	v := r.vertex(digest)
-	if !v.started && (started || cached) {
-		v.started = true
-		fmt.Fprintf(r.w, "#%d %s\n", v.step, name)
-	}
-	switch {
-	case v.done:
-	case failure != "":
-		v.done = true
-		fmt.Fprintf(r.w, "#%d ERROR %s\n", v.step, failure)
-	case cached && !v.cached:
-		v.cached, v.done = true, true
-		fmt.Fprintf(r.w, "#%d CACHED\n", v.step)
-	case completed:
-		v.done = true
-		fmt.Fprintf(r.w, "#%d DONE\n", v.step)
+	d.order = append(d.order, digest)
+	d.report(digest, runtime.ProgressStarted, nil)
+}
+
+func (d *traceDecoder) report(digest string, state runtime.ProgressState, output []byte) {
+	d.states[digest] = state
+	d.emit.Report(runtime.Progress{
+		ID: digest, Kind: runtime.ProgressVertex, Name: d.names[digest], State: state, Output: output,
+	})
+}
+
+// text reports plain stream output, which builders other than BuildKit emit.
+func (d *traceDecoder) text(s string) {
+	if s != "" {
+		d.emit.Report(runtime.Progress{Output: []byte(s)})
 	}
 }
 
-func (r *traceRenderer) renderLog(fields []pbField) {
-	var digest string
-	var message []byte
-	for _, f := range fields {
-		switch f.num {
-		case 1:
-			digest = string(f.bytes)
-		case 4:
-			message = f.bytes
+// close ends every vertex still open, as failed when the build did not finish.
+func (d *traceDecoder) close(failed bool) {
+	state := runtime.ProgressDone
+	if failed {
+		state = runtime.ProgressFailed
+	}
+	for _, digest := range d.order {
+		if !d.states[digest].Terminal() {
+			d.report(digest, state, nil)
 		}
 	}
-	if digest == "" || len(message) == 0 {
-		return
-	}
-	step := r.vertex(digest).step
-	for _, line := range strings.Split(strings.TrimRight(string(message), "\n"), "\n") {
-		fmt.Fprintf(r.w, "#%d %s\n", step, line)
-	}
-}
-
-// text writes plain stream output, which builders other than BuildKit emit.
-func (r *traceRenderer) text(s string) {
-	if s = strings.TrimRight(s, "\n"); s != "" {
-		fmt.Fprintln(r.w, s)
-	}
+	d.order = nil
 }

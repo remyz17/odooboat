@@ -1,7 +1,6 @@
 package docker
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -143,7 +142,9 @@ func (e *Engine) TagImage(ctx context.Context, source, target string) error {
 // BuildImage builds with BuildKit through the engine API, without a session:
 // the context travels as the request body (spike docker-build-sdk). BuildKit
 // pulls a missing FROM, so callers inspect bases first.
-func (e *Engine) BuildImage(ctx context.Context, req runtime.BuildRequest) (runtime.BuiltImage, error) {
+func (e *Engine) BuildImage(ctx context.Context, req runtime.BuildRequest) (_ runtime.BuiltImage, err error) {
+	trace := newTraceDecoder(req.Progress)
+	defer func() { trace.close(err != nil || ctx.Err() != nil) }()
 	identity, err := e.Info(ctx)
 	if err != nil {
 		return runtime.BuiltImage{}, err
@@ -159,7 +160,7 @@ func (e *Engine) BuildImage(ctx context.Context, req runtime.BuildRequest) (runt
 		return runtime.BuiltImage{}, fmt.Errorf("%w: %v", runtime.ErrImageBuild, err)
 	}
 	defer result.Body.Close()
-	id, err := readBuild(result.Body, newTraceRenderer(outputWriter(req.Progress)))
+	id, err := readBuild(result.Body, trace)
 	if ctx.Err() != nil {
 		// Closing the stream stops the build; the explicit cancel makes it so
 		// even if the engine kept the request alive.
@@ -177,9 +178,9 @@ func (e *Engine) BuildImage(ctx context.Context, req runtime.BuildRequest) (runt
 // traceID marks BuildKit progress messages in the build stream.
 const traceID = "moby.buildkit.trace"
 
-// readBuild consumes the build stream: BuildKit progress is rendered, the
+// readBuild consumes the build stream: BuildKit progress is decoded, the
 // image ID is taken from the final aux message, and the first error is kept.
-func readBuild(body io.Reader, trace *traceRenderer) (string, error) {
+func readBuild(body io.Reader, trace *traceDecoder) (string, error) {
 	decoder := json.NewDecoder(body)
 	var id string
 	for {
@@ -196,7 +197,7 @@ func readBuild(body io.Reader, trace *traceRenderer) (string, error) {
 		case message.Aux != nil && message.ID == traceID:
 			var payload []byte
 			if err := json.Unmarshal(*message.Aux, &payload); err == nil {
-				trace.render(payload)
+				trace.payload(payload)
 			}
 		case message.Aux != nil:
 			var result struct{ ID string }
@@ -219,15 +220,6 @@ func newBuildID() (string, error) {
 		return "", err
 	}
 	return "odooboat-" + hex.EncodeToString(b[:]), nil
-}
-
-// outputWriter reports what is written as operation output. It bridges the
-// text trace renderer until the renderer becomes a decoder.
-type outputWriter runtime.ProgressFunc
-
-func (w outputWriter) Write(p []byte) (int, error) {
-	runtime.ProgressFunc(w).Report(runtime.Progress{Output: bytes.Clone(p)})
-	return len(p), nil
 }
 
 func orDiscard(w io.Writer) io.Writer {
