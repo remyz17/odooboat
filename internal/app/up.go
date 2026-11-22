@@ -288,7 +288,7 @@ func preparePostgres(ctx context.Context, env LockedEnvironment, store runtime.I
 			ErrImageNotFound, ref, env.Binding.Connection.Alias)
 	default:
 		fmt.Fprintf(progress, "pulling PostgreSQL image %s\n", ref)
-		if err := store.PullImage(ctx, ref, progress); err != nil {
+		if err := store.PullImage(ctx, ref, textProgress(progress)); err != nil {
 			return image, err
 		}
 		if info, err = store.InspectImage(ctx, ref); err != nil {
