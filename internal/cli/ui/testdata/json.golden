@@ -1,0 +1,23 @@
+{"schema":1,"type":"lock-waiting","time":"2026-11-22T10:00:00Z","holder":{"operation":"up","pid":4242,"host":"laptop","startedAt":"2026-11-22T09:59:00Z"}}
+{"schema":1,"type":"lock-waiting","time":"2026-11-22T10:00:00Z","holder":null}
+{"schema":1,"type":"step-started","time":"2026-11-22T10:00:01Z","id":"1","kind":"build","subject":{"kind":"image","name":"odooboat/environment:abc"}}
+{"schema":1,"type":"step-finished","time":"2026-11-22T10:00:01.4Z","id":"1","outcome":"reused"}
+{"schema":1,"type":"step-started","time":"2026-11-22T10:00:02Z","id":"2","kind":"pull","subject":{"kind":"image","name":"postgres:16"}}
+{"schema":1,"type":"step-started","time":"2026-11-22T10:00:02Z","id":"3","parent":"2","kind":"pull","subject":{"kind":"layer","name":"a1b2c3d4e5f6"}}
+{"schema":1,"type":"transfer","time":"2026-11-22T10:00:02.5Z","id":"3","current":10,"total":100}
+{"schema":1,"type":"step-finished","time":"2026-11-22T10:00:03Z","id":"3","outcome":"done"}
+{"schema":1,"type":"step-started","time":"2026-11-22T10:00:03Z","id":"4","parent":"2","kind":"pull","subject":{"kind":"layer","name":"0f0f0f0f0f0f"}}
+{"schema":1,"type":"step-finished","time":"2026-11-22T10:00:03Z","id":"4","outcome":"kept"}
+{"schema":1,"type":"step-finished","time":"2026-11-22T10:00:04.5Z","id":"2","outcome":"done"}
+{"schema":1,"type":"step-started","time":"2026-11-22T10:00:05Z","id":"5","kind":"build","subject":{"kind":"image","name":"odooboat/environment:def"}}
+{"schema":1,"type":"step-started","time":"2026-11-22T10:00:05Z","id":"6","parent":"5","kind":"build","subject":{"kind":"build-step","name":"[3/5] RUN pip install"}}
+{"schema":1,"type":"step-output","time":"2026-11-22T10:00:06Z","id":"6","stream":"stdout","data":"Collecting nope\nERROR: no matching distribution"}
+{"schema":1,"type":"step-finished","time":"2026-11-22T10:00:07Z","id":"6","outcome":"failed"}
+{"schema":1,"type":"step-finished","time":"2026-11-22T10:00:07Z","id":"5","outcome":"failed","error":"image build failed: exit code: 1"}
+{"schema":1,"type":"step-started","time":"2026-11-22T10:00:10Z","id":"7","kind":"create","subject":{"kind":"container","name":"ob-shop-dev-odoo-1a2b3c4d","role":"odoo"}}
+{"schema":1,"type":"step-started","time":"2026-11-22T10:00:10Z","id":"8","parent":"7","kind":"wait","subject":{"kind":"container","name":"ob-shop-dev-odoo-1a2b3c4d","role":"odoo"}}
+{"schema":1,"type":"step-finished","time":"2026-11-22T10:01:40Z","id":"8","outcome":"done"}
+{"schema":1,"type":"step-finished","time":"2026-11-22T10:01:40Z","id":"7","outcome":"done"}
+{"schema":1,"type":"database-selected","time":"2026-11-22T10:01:41Z","name":"shop"}
+{"schema":1,"type":"session-degraded","time":"2026-11-22T10:01:41Z","operation":"resize","error":"no such exec"}
+{"schema":1,"type":"error","time":"2026-11-22T10:01:42Z","code":"image-build","message":"image build failed: exit code: 1","hint":"rerun with --pull"}
