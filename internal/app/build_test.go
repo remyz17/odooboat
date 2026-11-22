@@ -49,7 +49,7 @@ func (e *imageEngine) InspectImage(_ context.Context, ref string) (runtime.Image
 	return runtime.ImageInfo{}, fmt.Errorf("%w: %s", runtime.ErrImageNotFound, ref)
 }
 
-func (e *imageEngine) PullImage(_ context.Context, ref string, _ io.Writer) error {
+func (e *imageEngine) PullImage(_ context.Context, ref string, _ runtime.ProgressFunc) error {
 	info, ok := e.pullable[ref]
 	if !ok {
 		return errors.New("not in the registry")

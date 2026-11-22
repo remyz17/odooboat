@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -8,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
@@ -40,11 +42,12 @@ func (e *Engine) InspectImage(ctx context.Context, ref string) (runtime.ImageInf
 	return info, nil
 }
 
-func (e *Engine) PullImage(ctx context.Context, ref string, progress io.Writer) error {
+func (e *Engine) PullImage(ctx context.Context, ref string, progress runtime.ProgressFunc) (err error) {
 	if !runtime.IsPinned(ref) {
 		return fmt.Errorf("refusing to pull %s: only references pinned by digest are pulled", ref)
 	}
-	progress = orDiscard(progress)
+	layers := newPullDecoder(progress)
+	defer func() { layers.close(err != nil || ctx.Err() != nil) }()
 	response, err := e.client.ImagePull(ctx, ref, client.ImagePullOptions{})
 	if err != nil {
 		return fmt.Errorf("pull %s: %w", ref, err)
@@ -57,16 +60,74 @@ func (e *Engine) PullImage(ctx context.Context, ref string, progress io.Writer) 
 		if message.Error != nil {
 			return fmt.Errorf("pull %s: %s", ref, message.Error.Message)
 		}
-		// Byte-level progress is noise in a log; layer milestones are kept.
-		if message.Status != "" && message.Progress == nil {
-			if message.ID != "" {
-				fmt.Fprintf(progress, "%s: %s\n", message.ID, message.Status)
-			} else {
-				fmt.Fprintln(progress, message.Status)
-			}
+		layers.message(message)
+	}
+	return ctx.Err()
+}
+
+// layerIDRe matches the short layer IDs of pull messages; other IDs name the
+// reference being pulled.
+var layerIDRe = regexp.MustCompile(`^[0-9a-f]{12}$`)
+
+// pullDecoder turns pull messages into layer progress.
+type pullDecoder struct {
+	emit   runtime.ProgressFunc
+	open   []string
+	states map[string]runtime.ProgressState
+}
+
+func newPullDecoder(emit runtime.ProgressFunc) *pullDecoder {
+	return &pullDecoder{emit: emit, states: map[string]runtime.ProgressState{}}
+}
+
+func (d *pullDecoder) message(m jsonstream.Message) {
+	if !layerIDRe.MatchString(m.ID) {
+		return
+	}
+	report := runtime.Progress{ID: m.ID, Kind: runtime.ProgressLayer, Name: m.ID}
+	state, seen := d.states[m.ID]
+	if state.Terminal() {
+		return
+	}
+	if !seen {
+		d.report(report, runtime.ProgressStarted)
+		d.open = append(d.open, m.ID)
+	}
+	switch m.Status {
+	case "Already exists":
+		d.report(report, runtime.ProgressCached)
+	case "Pull complete":
+		d.report(report, runtime.ProgressDone)
+	case "Downloading":
+		if m.Progress != nil {
+			report.Current, report.Total = m.Progress.Current, m.Progress.Total
+		}
+		d.report(report, runtime.ProgressRunning)
+	default:
+		if seen {
+			d.report(report, runtime.ProgressRunning)
 		}
 	}
-	return nil
+}
+
+func (d *pullDecoder) report(p runtime.Progress, state runtime.ProgressState) {
+	p.State = state
+	d.states[p.ID] = state
+	d.emit.Report(p)
+}
+
+// close ends every layer still open, as failed when the pull did not finish.
+func (d *pullDecoder) close(failed bool) {
+	state := runtime.ProgressDone
+	if failed {
+		state = runtime.ProgressFailed
+	}
+	for _, id := range d.open {
+		if !d.states[id].Terminal() {
+			d.report(runtime.Progress{ID: id, Kind: runtime.ProgressLayer, Name: id}, state)
+		}
+	}
+	d.open = nil
 }
 
 func (e *Engine) TagImage(ctx context.Context, source, target string) error {
@@ -98,7 +159,7 @@ func (e *Engine) BuildImage(ctx context.Context, req runtime.BuildRequest) (runt
 		return runtime.BuiltImage{}, fmt.Errorf("%w: %v", runtime.ErrImageBuild, err)
 	}
 	defer result.Body.Close()
-	id, err := readBuild(result.Body, newTraceRenderer(orDiscard(req.Progress)))
+	id, err := readBuild(result.Body, newTraceRenderer(outputWriter(req.Progress)))
 	if ctx.Err() != nil {
 		// Closing the stream stops the build; the explicit cancel makes it so
 		// even if the engine kept the request alive.
@@ -158,6 +219,15 @@ func newBuildID() (string, error) {
 		return "", err
 	}
 	return "odooboat-" + hex.EncodeToString(b[:]), nil
+}
+
+// outputWriter reports what is written as operation output. It bridges the
+// text trace renderer until the renderer becomes a decoder.
+type outputWriter runtime.ProgressFunc
+
+func (w outputWriter) Write(p []byte) (int, error) {
+	runtime.ProgressFunc(w).Report(runtime.Progress{Output: bytes.Clone(p)})
+	return len(p), nil
 }
 
 func orDiscard(w io.Writer) io.Writer {

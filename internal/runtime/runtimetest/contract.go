@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -117,9 +118,9 @@ func testBuildAndTag(t *testing.T, connect Factory, hooks Hooks) {
 	cleanup(t, hooks, tag, alias)
 
 	label := strings.TrimPrefix(tag, "odooboat-contract/build:")
-	var progress bytes.Buffer
+	var progress progressLog
 	built, err := builder.BuildImage(ctx, runtime.BuildRequest{
-		Context: scratchContext(t, label), Tags: []string{tag}, Progress: &progress,
+		Context: scratchContext(t, label), Tags: []string{tag}, Progress: progress.report,
 		Labels: map[string]string{"odooboat.image.request-label": label},
 	})
 	if err != nil {
@@ -140,8 +141,8 @@ func testBuildAndTag(t *testing.T, connect Factory, hooks Hooks) {
 		inspected.Labels["odooboat.image.request-label"] != label {
 		t.Fatalf("inspected = %+v, built %s", inspected, built.ID)
 	}
-	if progress.Len() == 0 {
-		t.Error("build wrote no progress")
+	if len(progress.all()) == 0 {
+		t.Error("build reported no progress")
 	}
 
 	if err := store.TagImage(ctx, built.ID, alias); err != nil {
@@ -184,13 +185,29 @@ func testPull(t *testing.T, connect Factory, hooks Hooks) {
 		t.Skipf("%s is empty; set it to a reference pinned by digest to exercise pulls", PullRefEnv)
 	}
 	cleanup(t, hooks, ref)
-	var progress bytes.Buffer
-	if err := store.PullImage(ctx, ref, &progress); err != nil {
+	_, err := store.InspectImage(ctx, ref)
+	absent := errors.Is(err, runtime.ErrImageNotFound)
+	var progress progressLog
+	if err := store.PullImage(ctx, ref, progress.report); err != nil {
 		t.Fatalf("pull %s: %v\n%s", ref, err, progress.String())
 	}
 	if _, err := store.InspectImage(ctx, ref); err != nil {
 		t.Fatalf("inspect pulled image: %v", err)
 	}
+	reports := progress.all()
+	CheckProgress(t, reports)
+	if absent && !hasLayerEnding(reports, runtime.ProgressDone, runtime.ProgressCached) {
+		t.Errorf("pulling an absent image reported no layer ending done or cached:\n%s", progress.String())
+	}
+}
+
+func hasLayerEnding(reports []runtime.Progress, states ...runtime.ProgressState) bool {
+	for _, p := range reports {
+		if p.Kind == runtime.ProgressLayer && slices.Contains(states, p.State) {
+			return true
+		}
+	}
+	return false
 }
 
 func cleanup(t *testing.T, hooks Hooks, refs ...string) {

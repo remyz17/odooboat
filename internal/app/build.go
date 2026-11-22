@@ -188,7 +188,7 @@ func buildEnvironment(ctx context.Context, env LockedEnvironment, pull bool, pro
 	fmt.Fprintf(progress, "building environment image %s\n", plan.Tag())
 	built, err := buildFromContext(plan.WriteContext, func(context io.Reader) (runtime.BuiltImage, error) {
 		return builder.BuildImage(ctx, runtime.BuildRequest{
-			Context: context, Tags: []string{plan.Tag()}, Labels: plan.Metadata(base.Reference).Labels(), Progress: progress,
+			Context: context, Tags: []string{plan.Tag()}, Labels: plan.Metadata(base.Reference).Labels(), Progress: textProgress(progress),
 		})
 	})
 	if err != nil {
@@ -248,7 +248,7 @@ func prepareBase(ctx context.Context, env LockedEnvironment, store runtime.Image
 			return BuildBase{}, "", fmt.Errorf("%w: runtime connection %q cannot pull images", ErrRuntimeUnsupported, env.Binding.Connection.Alias)
 		}
 		fmt.Fprintf(progress, "pulling base image %s\n", ref)
-		if err := store.PullImage(ctx, ref, progress); err != nil {
+		if err := store.PullImage(ctx, ref, textProgress(progress)); err != nil {
 			return BuildBase{}, "", err
 		}
 		if info, err = store.InspectImage(ctx, ref); err != nil {
@@ -338,4 +338,17 @@ func deliver(built runtime.BuiltImage, env LockedEnvironment) error {
 			ErrRuntimeUnsupported, built.ID, built.Engine.Source, built.Engine.Value)
 	}
 	return nil
+}
+
+// textProgress writes runtime progress as text: a line per layer state and
+// build output as is. It is a bridge until the operations report typed
+// events (ADR 0011 §11 step 1).
+func textProgress(w io.Writer) runtime.ProgressFunc {
+	return func(p runtime.Progress) {
+		if p.Kind == runtime.ProgressLayer {
+			fmt.Fprintf(w, "%s: %s\n", p.Name, p.State)
+			return
+		}
+		_, _ = w.Write(p.Output)
+	}
 }

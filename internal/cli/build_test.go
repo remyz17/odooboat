@@ -45,13 +45,17 @@ func (s *imageStub) InspectImage(_ context.Context, ref string) (runtime.ImageIn
 	return runtime.ImageInfo{}, fmt.Errorf("%w: %s", runtime.ErrImageNotFound, ref)
 }
 
-func (s *imageStub) PullImage(_ context.Context, ref string, progress io.Writer) error {
+func (s *imageStub) PullImage(_ context.Context, ref string, progress runtime.ProgressFunc) error {
 	info, ok := s.registry[ref]
 	if !ok {
 		return errors.New("not in the registry")
 	}
 	s.pulls++
-	fmt.Fprintf(progress, "%s: Pull complete\n", ref)
+	layer := runtime.Progress{ID: "0123456789ab", Kind: runtime.ProgressLayer, Name: "0123456789ab"}
+	for _, state := range []runtime.ProgressState{runtime.ProgressStarted, runtime.ProgressDone} {
+		layer.State = state
+		progress.Report(layer)
+	}
 	s.images[ref] = info
 	return nil
 }
@@ -70,7 +74,7 @@ func (s *imageStub) BuildImage(_ context.Context, req runtime.BuildRequest) (run
 		return runtime.BuiltImage{}, err
 	}
 	s.builds++
-	fmt.Fprintln(req.Progress, "#1 stub build step")
+	req.Progress.Report(runtime.Progress{Output: []byte("#1 stub build step\n")})
 	info := runtime.ImageInfo{ID: fmt.Sprintf("sha256:built-%d", s.builds), Labels: req.Labels, Arch: "arm64"}
 	for _, tag := range req.Tags {
 		s.images[tag] = info
@@ -185,7 +189,7 @@ func TestEnvironmentBuildPullFlag(t *testing.T) {
 	if pulled.err != nil || json.Unmarshal([]byte(pulled.stdout), &built) != nil {
 		t.Fatalf("with --pull = %q, %v", pulled.stdout, pulled.err)
 	}
-	if !built.Base.Pulled || engine.pulls != 1 || engine.builds != 1 || !strings.Contains(pulled.stderr, "Pull complete") {
+	if !built.Base.Pulled || engine.pulls != 1 || engine.builds != 1 || !strings.Contains(pulled.stderr, "0123456789ab: done") {
 		t.Fatalf("with --pull = %+v (pulls %d, builds %d), stderr %q", built, engine.pulls, engine.builds, pulled.stderr)
 	}
 }

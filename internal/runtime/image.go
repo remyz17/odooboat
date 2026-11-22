@@ -157,8 +157,8 @@ func IsPinned(ref string) bool { return pinnedRe.MatchString(ref) }
 type ImageStore interface {
 	// InspectImage returns ErrImageNotFound when ref is absent.
 	InspectImage(ctx context.Context, ref string) (ImageInfo, error)
-	// PullImage pulls a reference pinned by digest, writing progress lines.
-	PullImage(ctx context.Context, ref string, progress io.Writer) error
+	// PullImage pulls a reference pinned by digest, reporting its layers.
+	PullImage(ctx context.Context, ref string, progress ProgressFunc) error
 	// TagImage adds target as a name of the image source designates.
 	TagImage(ctx context.Context, source, target string) error
 }
@@ -172,7 +172,7 @@ type BuildRequest struct {
 	// Labels are applied to the final image by the builder, so metadata
 	// derived from the Dockerfile itself never has to be written into it.
 	Labels   map[string]string
-	Progress io.Writer
+	Progress ProgressFunc
 }
 
 // BuiltImage is a build result and the engine that holds it. It reaches the
