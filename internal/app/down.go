@@ -3,8 +3,6 @@ package app
 import (
 	"context"
 	"errors"
-	"fmt"
-	"io"
 	"sort"
 	"strconv"
 
@@ -16,7 +14,9 @@ import (
 type DownRequest struct {
 	Selector Selector
 	Wait     WaitOptions
-	Progress io.Writer
+	// Reporter receives a remove step per container and network; nil
+	// discards them.
+	Reporter Reporter
 }
 
 type DownResult struct {
@@ -38,12 +38,9 @@ var stopOrder = map[runtime.Role]int{runtime.RoleOdoo: 0, runtime.RoleJob: 1, ru
 // Down stops and removes the environment's containers and network, keeping
 // its volumes (ADR 0009 §7).
 func (s WorkspaceService) Down(ctx context.Context, req DownRequest) (DownResult, error) {
-	progress := req.Progress
-	if progress == nil {
-		progress = io.Discard
-	}
+	tracker := newTracker(req.Reporter)
 	var result DownResult
-	err := s.withEnvironment(ctx, req.Selector, OperationDown, req.Wait, func(ctx context.Context, env LockedEnvironment) error {
+	err := s.withEnvironment(ctx, req.Selector, OperationDown, req.Wait, req.Reporter, func(ctx context.Context, env LockedEnvironment) error {
 		result.WorkspaceID, result.EnvironmentID, result.Environment, result.Preferences = env.WorkspaceID, env.Binding.ID, env.Name, env.Preferences
 		stores, err := lifecycleStores(env, runtime.CapLabelsContainer, runtime.CapLabelsNetwork, runtime.CapLabelsVolume, runtime.CapLabelsFilter)
 		if err != nil {
@@ -86,16 +83,20 @@ func (s WorkspaceService) Down(ctx context.Context, req DownRequest) (DownResult
 			if t.role == runtime.RolePostgres {
 				grace = postgresStopGrace
 			}
-			fmt.Fprintf(progress, "container %s: stopping\n", t.info.Name)
+			run := tracker.start("", StepRemove, resourceSubject(runtime.ResourceContainer, t.info.Name, t.role))
+			var err error
 			if t.info.State == runtime.ContainerRunning {
-				if err := stores.containers.StopContainer(ctx, t.info.ID, grace); err != nil && !errors.Is(err, runtime.ErrNotFound) {
-					return partial(err, result.Removed)
-				}
+				err = ignoreNotFound(stores.containers.StopContainer(ctx, t.info.ID, grace))
 			}
-			if err := stores.containers.RemoveContainer(ctx, t.info.ID); err != nil && !errors.Is(err, runtime.ErrNotFound) {
+			if err == nil {
+				err = ignoreNotFound(stores.containers.RemoveContainer(ctx, t.info.ID))
+			}
+			run.finish(ctx, err)
+			if err != nil {
 				return partial(err, result.Removed)
 			}
-			result.Removed = append(result.Removed, ResourceReport{Kind: runtime.ResourceContainer, Role: t.role, Name: t.info.Name, Action: "removed"})
+			result.Removed = append(result.Removed, ResourceReport{Kind: runtime.ResourceContainer, Role: t.role, Name: t.info.Name,
+				Action: ActionOf(StepRemove, OutcomeDone)})
 		}
 
 		networks, err := stores.networks.ListNetworks(ctx, filter)
@@ -108,11 +109,14 @@ func (s WorkspaceService) Down(ctx context.Context, req DownRequest) (DownResult
 				result.Skipped = append(result.Skipped, ResourceReport{Kind: runtime.ResourceNetwork, Role: role, Name: n.Name, Reason: reason})
 				continue
 			}
-			fmt.Fprintf(progress, "network %s: removing\n", n.Name)
-			if err := stores.networks.RemoveNetwork(ctx, n.ID); err != nil && !errors.Is(err, runtime.ErrNotFound) {
+			run := tracker.start("", StepRemove, resourceSubject(runtime.ResourceNetwork, n.Name, role))
+			err := ignoreNotFound(stores.networks.RemoveNetwork(ctx, n.ID))
+			run.finish(ctx, err)
+			if err != nil {
 				return partial(err, result.Removed)
 			}
-			result.Removed = append(result.Removed, ResourceReport{Kind: runtime.ResourceNetwork, Role: role, Name: n.Name, Action: "removed"})
+			result.Removed = append(result.Removed, ResourceReport{Kind: runtime.ResourceNetwork, Role: role, Name: n.Name,
+				Action: ActionOf(StepRemove, OutcomeDone)})
 		}
 
 		volumes, err := stores.volumes.ListVolumes(ctx, filter)
@@ -121,11 +125,19 @@ func (s WorkspaceService) Down(ctx context.Context, req DownRequest) (DownResult
 		}
 		for _, v := range volumes {
 			role, _ := claimOf(runtime.ResourceVolume, v.Labels)
-			result.Kept = append(result.Kept, ResourceReport{Kind: runtime.ResourceVolume, Role: role, Name: v.Name, Action: "kept"})
+			result.Kept = append(result.Kept, ResourceReport{Kind: runtime.ResourceVolume, Role: role, Name: v.Name, Action: ActionKept})
 		}
 		return nil
 	})
 	return result, err
+}
+
+// ignoreNotFound treats a resource that is already gone as removed.
+func ignoreNotFound(err error) error {
+	if errors.Is(err, runtime.ErrNotFound) {
+		return nil
+	}
+	return err
 }
 
 type StatusRequest struct{ Selector Selector }

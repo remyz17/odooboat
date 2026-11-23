@@ -21,7 +21,7 @@ func newUpCommand(deps Dependencies, global *globalFlags) *cobra.Command {
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			result, err := deps.Workspace.Up(cmd.Context(), app.UpRequest{
-				Selector: global.selector(cmd, deps), Wait: global.waitOptions(), Pull: pull, Progress: deps.Stderr,
+				Selector: global.selector(cmd, deps), Wait: lockWait, Pull: pull, Reporter: global.reporter(),
 			})
 			if err != nil {
 				return err
@@ -46,7 +46,7 @@ func newDownCommand(deps Dependencies, global *globalFlags) *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			result, err := deps.Workspace.Down(cmd.Context(), app.DownRequest{
-				Selector: global.selector(cmd, deps), Wait: global.waitOptions(), Progress: deps.Stderr,
+				Selector: global.selector(cmd, deps), Wait: lockWait, Reporter: global.reporter(),
 			})
 			if err != nil {
 				return err
@@ -84,11 +84,5 @@ func newStatusCommand(deps Dependencies, global *globalFlags) *cobra.Command {
 	return cmd
 }
 
-// waitOptions waits for the lock and reports the wait as an event.
-func (g *globalFlags) waitOptions() app.WaitOptions {
-	return app.WaitOptions{Policy: app.Wait, OnWait: func(holder *app.LockHolder) {
-		if r := g.reporter(); r != nil {
-			r.Report(app.LockWaiting{Holder: holder})
-		}
-	}}
-}
+// lockWait waits for the environment lock; the wait is reported as an event.
+var lockWait = app.WaitOptions{Policy: app.Wait}

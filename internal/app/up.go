@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"slices"
 	"strconv"
@@ -55,8 +54,10 @@ type UpRequest struct {
 	Wait     WaitOptions
 	// Pull allows pulling missing images pinned by digest: the base and the
 	// PostgreSQL server image.
-	Pull     bool
-	Progress io.Writer
+	Pull bool
+	// Reporter receives the pulls, the build, a step per resource, and the
+	// readiness waits; nil discards them.
+	Reporter Reporter
 }
 
 // ResourceReport describes one resource and what an operation did with it.
@@ -64,7 +65,7 @@ type ResourceReport struct {
 	Kind   runtime.ResourceType `yaml:"kind" json:"kind"`
 	Role   runtime.Role         `yaml:"role" json:"role"`
 	Name   string               `yaml:"name" json:"name"`
-	Action string               `yaml:"action,omitempty" json:"action,omitempty"`
+	Action Action               `yaml:"action,omitempty" json:"action,omitempty"`
 	State  string               `yaml:"state,omitempty" json:"state,omitempty"`
 	Reason string               `yaml:"reason,omitempty" json:"reason,omitempty"`
 }
@@ -152,10 +153,6 @@ func lifecycleStores(env LockedEnvironment, required ...runtime.Capability) (lif
 // Up brings the environment to its desired state and waits until it is ready
 // (ADR 0009 §6).
 func (s WorkspaceService) Up(ctx context.Context, req UpRequest) (UpResult, error) {
-	progress := req.Progress
-	if progress == nil {
-		progress = io.Discard
-	}
 	resolved, err := config.Resolve(req.Selector.options())
 	if err != nil {
 		return UpResult{}, err
@@ -164,8 +161,8 @@ func (s WorkspaceService) Up(ctx context.Context, req UpRequest) (UpResult, erro
 		return UpResult{}, err
 	}
 	var result UpResult
-	err = s.withEnvironment(ctx, req.Selector, OperationUp, req.Wait, func(ctx context.Context, env LockedEnvironment) error {
-		up, err := s.up(ctx, env, req.Pull, progress)
+	err = s.withEnvironment(ctx, req.Selector, OperationUp, req.Wait, req.Reporter, func(ctx context.Context, env LockedEnvironment) error {
+		up, err := s.up(ctx, env, req.Pull, newTracker(req.Reporter))
 		up.WorkspaceID, up.EnvironmentID, up.Environment, up.Preferences = env.WorkspaceID, env.Binding.ID, env.Name, env.Preferences
 		result = up
 		return err
@@ -173,7 +170,7 @@ func (s WorkspaceService) Up(ctx context.Context, req UpRequest) (UpResult, erro
 	return result, err
 }
 
-func (s WorkspaceService) up(ctx context.Context, env LockedEnvironment, pull bool, progress io.Writer) (UpResult, error) {
+func (s WorkspaceService) up(ctx context.Context, env LockedEnvironment, pull bool, t *tracker) (UpResult, error) {
 	cfg := env.Config
 	in, err := resolveLifecycle(cfg)
 	if err != nil {
@@ -207,11 +204,10 @@ func (s WorkspaceService) up(ctx context.Context, env LockedEnvironment, pull bo
 		return UpResult{}, err
 	}
 	var result UpResult
-	if result.Postgres, err = preparePostgres(ctx, env, stores.images, in.postgresRef, cfg.Postgres, pull, progress); err != nil {
+	if result.Postgres, err = preparePostgres(ctx, env, stores.images, in.postgresRef, cfg.Postgres, pull, t); err != nil {
 		return result, err
 	}
-	// Until up reports typed steps, its build reports none.
-	built, err := buildEnvironment(ctx, env, pull, newTracker(nil))
+	built, err := buildEnvironment(ctx, env, pull, t)
 	if err != nil {
 		return result, err
 	}
@@ -244,15 +240,22 @@ func (s WorkspaceService) up(ctx context.Context, env LockedEnvironment, pull bo
 	}
 
 	for _, step := range steps {
-		if err := applyStep(ctx, stores, step, progress); err != nil {
+		run := t.start("", step.stepKind(), step.subject())
+		if err := applyStep(ctx, stores, step); err != nil {
+			run.finish(ctx, err)
 			return result, partial(err, result.Resources)
 		}
 		result.Resources = append(result.Resources, step.report())
 		if step.container != nil {
-			if err := waitReady(ctx, stores.containers, step.container, progress); err != nil {
+			wait := t.start(run.id(), StepWait, step.subject())
+			err := waitReady(ctx, stores.containers, step.container, wait)
+			wait.finish(ctx, err)
+			if err != nil {
+				run.finish(ctx, err)
 				return result, partial(err, result.Resources)
 			}
 		}
+		run.finishAs(step.outcome())
 	}
 
 	odoo, err := stores.containers.InspectContainer(ctx, desired.Odoo.Spec.Name)
@@ -277,7 +280,7 @@ func needsBindMounts(cfg config.ResolvedConfig) bool {
 // preparePostgres finds the pinned server image, pulling it only when allowed,
 // and checks it claims no ownership and runs the configured major version.
 func preparePostgres(ctx context.Context, env LockedEnvironment, store runtime.ImageStore, ref string, major int,
-	pull bool, progress io.Writer) (UpImage, error) {
+	pull bool, t *tracker) (UpImage, error) {
 	image := UpImage{Image: ref}
 	info, err := store.InspectImage(ctx, ref)
 	switch {
@@ -288,8 +291,7 @@ func preparePostgres(ctx context.Context, env LockedEnvironment, store runtime.I
 		return image, WithHint(fmt.Errorf("%w: PostgreSQL image %s is not present in runtime %q",
 			ErrImageNotFound, ref, env.Binding.Connection.Alias), "rerun with --pull")
 	default:
-		fmt.Fprintf(progress, "pulling PostgreSQL image %s\n", ref)
-		if err := store.PullImage(ctx, ref, textProgress(progress)); err != nil {
+		if err := pullImage(ctx, store, ref, t); err != nil {
 			return image, err
 		}
 		if info, err = store.InspectImage(ctx, ref); err != nil {
@@ -353,7 +355,7 @@ type step struct {
 	kind   runtime.ResourceType
 	role   runtime.Role
 	name   string
-	action string // created, kept, started, replaced
+	action Action // created, kept, started, replaced
 	// existing is the ID of the observed container, for start and replace.
 	existing  string
 	network   *envspec.Network
@@ -361,16 +363,40 @@ type step struct {
 	container *envspec.Container
 }
 
-func (s step) report() ResourceReport {
-	return ResourceReport{Kind: s.kind, Role: s.role, Name: s.name, Action: s.action}
+// stepKind is the kind of the step that brings the resource to its desired
+// state: create for one created or kept as it is.
+func (s step) stepKind() StepKind {
+	switch s.action {
+	case ActionStarted:
+		return StepStart
+	case ActionReplaced:
+		return StepReplace
+	}
+	return StepCreate
 }
 
-const (
-	actionCreated  = "created"
-	actionKept     = "kept"
-	actionStarted  = "started"
-	actionReplaced = "replaced"
-)
+func (s step) outcome() Outcome {
+	if s.action == ActionKept {
+		return OutcomeKept
+	}
+	return OutcomeDone
+}
+
+func (s step) subject() Subject { return resourceSubject(s.kind, s.name, s.role) }
+
+// resourceSubject names a runtime resource as a step subject.
+func resourceSubject(kind runtime.ResourceType, name string, role runtime.Role) Subject {
+	kinds := map[runtime.ResourceType]ResourceKind{
+		runtime.ResourceContainer: ResourceContainer, runtime.ResourceNetwork: ResourceNetwork, runtime.ResourceVolume: ResourceVolume,
+	}
+	return Subject{Kind: kinds[kind], Name: name, Role: role}
+}
+
+// report is the result entry of a step that succeeded; its action is the
+// step's, so results and events agree.
+func (s step) report() ResourceReport {
+	return ResourceReport{Kind: s.kind, Role: s.role, Name: s.name, Action: ActionOf(s.stepKind(), s.outcome())}
+}
 
 // owned checks that a resource found under an expected name is this
 // environment's, with the expected role, and can be mutated.
@@ -442,9 +468,9 @@ func guardData(ctx context.Context, e lifecycleEngine, id envspec.Identity, post
 // is incompatible.
 func planUp(d envspec.Desired, o observed, id envspec.Identity) ([]step, error) {
 	var steps []step
-	network := step{kind: runtime.ResourceNetwork, role: runtime.RoleEnvironment, name: d.Network.Name, action: actionKept}
+	network := step{kind: runtime.ResourceNetwork, role: runtime.RoleEnvironment, name: d.Network.Name, action: ActionKept}
 	if o.network == nil {
-		network.action, network.network = actionCreated, &d.Network
+		network.action, network.network = ActionCreated, &d.Network
 	} else if _, err := owned(runtime.ResourceNetwork, d.Network.Name, o.network.Labels, runtime.RoleEnvironment, id); err != nil {
 		return nil, err
 	}
@@ -452,10 +478,10 @@ func planUp(d envspec.Desired, o observed, id envspec.Identity) ([]step, error) 
 
 	for i := range d.Volumes {
 		v := &d.Volumes[i]
-		s := step{kind: runtime.ResourceVolume, role: v.Role, name: v.Name, action: actionKept}
+		s := step{kind: runtime.ResourceVolume, role: v.Role, name: v.Name, action: ActionKept}
 		existing := o.volumes[v.Name]
 		if existing == nil {
-			s.action, s.volume = actionCreated, v
+			s.action, s.volume = ActionCreated, v
 			steps = append(steps, s)
 			continue
 		}
@@ -470,7 +496,7 @@ func planUp(d envspec.Desired, o observed, id envspec.Identity) ([]step, error) 
 		s := step{kind: runtime.ResourceContainer, role: c.Role, name: c.Spec.Name, container: &c}
 		existing := o.containers[c.Spec.Name]
 		if existing == nil {
-			s.action = actionCreated
+			s.action = ActionCreated
 			steps = append(steps, s)
 			continue
 		}
@@ -481,11 +507,11 @@ func planUp(d envspec.Desired, o observed, id envspec.Identity) ([]step, error) 
 		s.existing = existing.ID
 		switch {
 		case ownership.Spec != c.Hash || existing.State == runtime.ContainerOther:
-			s.action = actionReplaced
+			s.action = ActionReplaced
 		case existing.State == runtime.ContainerRunning:
-			s.action = actionKept
+			s.action = ActionKept
 		default:
-			s.action = actionStarted
+			s.action = ActionStarted
 		}
 		steps = append(steps, s)
 	}
@@ -523,8 +549,7 @@ func staleResources(ctx context.Context, e lifecycleEngine, d envspec.Desired, i
 	return stale, nil
 }
 
-func applyStep(ctx context.Context, e lifecycleEngine, s step, progress io.Writer) error {
-	fmt.Fprintf(progress, "%s %s: %s\n", s.kind, s.name, s.action)
+func applyStep(ctx context.Context, e lifecycleEngine, s step) error {
 	switch {
 	case s.network != nil:
 		_, err := e.networks.CreateNetwork(ctx, s.network.Name, s.network.Labels)
@@ -535,11 +560,11 @@ func applyStep(ctx context.Context, e lifecycleEngine, s step, progress io.Write
 		return nil
 	}
 	switch s.action {
-	case actionKept:
+	case ActionKept:
 		return nil
-	case actionStarted:
+	case ActionStarted:
 		return e.containers.StartContainer(ctx, s.existing)
-	case actionReplaced:
+	case ActionReplaced:
 		grace := odooStopGrace
 		if s.role == runtime.RolePostgres {
 			grace = postgresStopGrace
@@ -580,12 +605,13 @@ func readinessProbe(role runtime.Role) []string {
 
 // waitReady polls the container's readiness probe until it succeeds, the
 // container stops, or the deadline passes (ADR 0009 §5).
-func waitReady(ctx context.Context, containers runtime.ContainerStore, c *envspec.Container, progress io.Writer) error {
+// When it gives up, the container's last log lines are the wait step's
+// output.
+func waitReady(ctx context.Context, containers runtime.ContainerStore, c *envspec.Container, wait *stepRun) error {
 	timeout := odooReadyTimeout
 	if c.Role == runtime.RolePostgres {
 		timeout = postgresReadyTimeout
 	}
-	fmt.Fprintf(progress, "waiting for %s to be ready\n", c.Role)
 	deadline := time.Now().Add(timeout)
 	probe := readinessProbe(c.Role)
 	for {
@@ -594,7 +620,7 @@ func waitReady(ctx context.Context, containers runtime.ContainerStore, c *envspe
 			return err
 		}
 		if info.State != runtime.ContainerRunning {
-			return notReady(ctx, containers, info.ID, fmt.Sprintf("%s container %s stopped (state %s, exit code %d)",
+			return notReady(ctx, containers, info.ID, c.Role, wait, fmt.Sprintf("%s container %s stopped (state %s, exit code %d)",
 				c.Role, c.Spec.Name, info.State, info.ExitCode))
 		}
 		result, err := containers.ExecContainer(ctx, info.ID, runtime.ExecRequest{Cmd: probe})
@@ -605,7 +631,7 @@ func waitReady(ctx context.Context, containers runtime.ContainerStore, c *envspe
 			return nil
 		}
 		if time.Now().After(deadline) {
-			return notReady(ctx, containers, info.ID, fmt.Sprintf("%s container %s was not ready after %s", c.Role, c.Spec.Name, timeout))
+			return notReady(ctx, containers, info.ID, c.Role, wait, fmt.Sprintf("%s container %s was not ready after %s", c.Role, c.Spec.Name, timeout))
 		}
 		select {
 		case <-ctx.Done():
@@ -615,12 +641,15 @@ func waitReady(ctx context.Context, containers runtime.ContainerStore, c *envspe
 	}
 }
 
-func notReady(ctx context.Context, containers runtime.ContainerStore, id, reason string) error {
+// notReady reports the container's last log lines as output of the wait
+// step; the error keeps the reason and points to the full log.
+func notReady(ctx context.Context, containers runtime.ContainerStore, id string, role runtime.Role, wait *stepRun, reason string) error {
 	var logs bytes.Buffer
 	if err := containers.ContainerLogs(ctx, id, runtime.LogOptions{Tail: failureLogLines}, &logs, &logs); err != nil {
 		return fmt.Errorf("%w: %s (logs unavailable: %v)", ErrNotReady, reason, err)
 	}
-	return fmt.Errorf("%w: %s; last log lines:\n%s", ErrNotReady, reason, strings.TrimRight(logs.String(), "\n"))
+	wait.output(StreamStdout, logs.Bytes())
+	return WithHint(fmt.Errorf("%w: %s", ErrNotReady, reason), fmt.Sprintf("odooboat logs %s shows the full log", role))
 }
 
 // partial reports what was completed before a failure: nothing is rolled
@@ -631,7 +660,7 @@ func partial(err error, done []ResourceReport) error {
 	}
 	parts := make([]string, len(done))
 	for i, r := range done {
-		parts[i] = r.Name + " " + r.Action
+		parts[i] = r.Name + " " + string(r.Action)
 	}
 	err = fmt.Errorf("%w\ncompleted before the failure: %s", err, strings.Join(parts, ", "))
 	if Hint(err) == "" {

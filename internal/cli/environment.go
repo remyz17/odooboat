@@ -66,7 +66,7 @@ func newEnvironmentVerifyCommand(deps Dependencies, global *globalFlags) *cobra.
 			selector := global.selector(cmd, deps)
 			result, err := deps.Workspace.VerifyEnvironment(cmd.Context(), app.EnvironmentVerifyRequest{
 				Selector: selector,
-				Wait:     global.waitOptions(),
+				Wait:     lockWait, Reporter: global.reporter(),
 			})
 			if err != nil {
 				return err
@@ -94,7 +94,7 @@ func newEnvironmentBuildCommand(deps Dependencies, global *globalFlags) *cobra.C
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			result, err := deps.Workspace.BuildEnvironment(cmd.Context(), app.EnvironmentBuildRequest{
 				Selector: global.selector(cmd, deps),
-				Wait:     global.waitOptions(),
+				Wait:     lockWait,
 				Pull:     pull, Reporter: global.reporter(),
 			})
 			if err != nil {

@@ -41,7 +41,11 @@ type resourceEngine struct {
 	// execOutput answers them, readiness probes answering probeExit when nil.
 	execCalls  []sessionCall
 	execOutput func(runtime.ExecRequest) (string, int)
+	// failures makes the named calls fail (see failingCalls).
+	failures map[string]error
 }
+
+func (e *resourceEngine) injected(call string) error { return e.failures[call] }
 
 type logCall struct {
 	id   string
@@ -119,12 +123,18 @@ func (e *resourceEngine) ListContainers(_ context.Context, filter runtime.LabelF
 
 func (e *resourceEngine) InspectContainer(_ context.Context, nameOrID string) (runtime.ContainerInfo, error) {
 	if c := e.byID(nameOrID); c != nil {
+		if err := e.injected("inspect running"); err != nil && c.State == runtime.ContainerRunning {
+			return runtime.ContainerInfo{}, err
+		}
 		return *c, nil
 	}
 	return runtime.ContainerInfo{}, fmt.Errorf("%w: container %s", runtime.ErrNotFound, nameOrID)
 }
 
 func (e *resourceEngine) CreateContainer(_ context.Context, spec runtime.ContainerSpec) (string, error) {
+	if err := e.injected("create container"); err != nil {
+		return "", err
+	}
 	if _, ok := e.containers[spec.Name]; ok {
 		return "", fmt.Errorf("%w: container %s", runtime.ErrConflict, spec.Name)
 	}
@@ -145,6 +155,9 @@ func (e *resourceEngine) CreateContainer(_ context.Context, spec runtime.Contain
 }
 
 func (e *resourceEngine) CopyToContainer(_ context.Context, id, dir string, archive io.Reader) error {
+	if err := e.injected("copy"); err != nil {
+		return err
+	}
 	tr := tar.NewReader(archive)
 	files := map[string][]byte{}
 	for {
@@ -164,6 +177,9 @@ func (e *resourceEngine) CopyToContainer(_ context.Context, id, dir string, arch
 }
 
 func (e *resourceEngine) StartContainer(_ context.Context, id string) error {
+	if err := e.injected("start"); err != nil {
+		return err
+	}
 	c := e.byID(id)
 	if c == nil {
 		return fmt.Errorf("%w: %s", runtime.ErrNotFound, id)
@@ -197,6 +213,9 @@ func (e *resourceEngine) RemoveContainer(_ context.Context, id string) error {
 }
 
 func (e *resourceEngine) ExecContainer(_ context.Context, id string, req runtime.ExecRequest) (runtime.ExecResult, error) {
+	if err := e.injected("exec"); err != nil {
+		return runtime.ExecResult{}, err
+	}
 	if c := e.byID(id); c == nil || c.State != runtime.ContainerRunning {
 		return runtime.ExecResult{}, fmt.Errorf("container %s is not running", id)
 	}
@@ -244,6 +263,9 @@ func (e *resourceEngine) InspectNetwork(_ context.Context, name string) (runtime
 }
 
 func (e *resourceEngine) CreateNetwork(_ context.Context, name string, labels map[string]string) (string, error) {
+	if err := e.injected("create network"); err != nil {
+		return "", err
+	}
 	e.networks[name] = runtime.NetworkInfo{ID: "n-" + name, Name: name, Labels: labels}
 	e.record("create network %s", name)
 	return "n-" + name, nil
@@ -273,6 +295,9 @@ func (e *resourceEngine) InspectVolume(_ context.Context, name string) (runtime.
 }
 
 func (e *resourceEngine) CreateVolume(_ context.Context, name string, labels map[string]string) error {
+	if err := e.injected("create volume"); err != nil {
+		return err
+	}
 	if _, ok := e.volumes[name]; ok {
 		return fmt.Errorf("%w: volume %s", runtime.ErrConflict, name)
 	}
@@ -327,8 +352,8 @@ func (f *lifecycleFixture) name(result UpResult, role runtime.Role) string {
 	return name
 }
 
-func actions(result UpResult) map[runtime.Role]string {
-	out := map[runtime.Role]string{}
+func actions(result UpResult) map[runtime.Role]Action {
+	out := map[runtime.Role]Action{}
 	for _, r := range result.Resources {
 		out[r.Role] = r.Action
 	}
@@ -348,7 +373,7 @@ func TestUpCreatesWaitsThenKeeps(t *testing.T) {
 	f := newLifecycle(t, newResourceEngine(t), "")
 	first := f.mustUp()
 	for role, action := range actions(first) {
-		if action != actionCreated {
+		if action != ActionCreated {
 			t.Errorf("first up: %s %s", role, action)
 		}
 	}
@@ -377,7 +402,7 @@ func TestUpCreatesWaitsThenKeeps(t *testing.T) {
 	f.engine.calls = nil
 	second := f.mustUp()
 	for role, action := range actions(second) {
-		if action != actionKept {
+		if action != ActionKept {
 			t.Errorf("second up: %s %s", role, action)
 		}
 	}
@@ -387,7 +412,7 @@ func TestUpCreatesWaitsThenKeeps(t *testing.T) {
 
 	// A stopped container is started, not recreated.
 	f.engine.containers[odoo].State = runtime.ContainerExited
-	if got := actions(f.mustUp())[runtime.RoleOdoo]; got != actionStarted {
+	if got := actions(f.mustUp())[runtime.RoleOdoo]; got != ActionStarted {
 		t.Fatalf("stopped odoo: %s", got)
 	}
 }
@@ -398,7 +423,7 @@ func TestUpReplacesOnlyWhatChanged(t *testing.T) {
 	f.rewrite("    options:\n      limit_time_real: \"240\"\n")
 	f.engine.calls = nil
 	second := f.mustUp()
-	if got := actions(second); got[runtime.RoleOdoo] != actionReplaced || got[runtime.RolePostgres] != actionKept {
+	if got := actions(second); got[runtime.RoleOdoo] != ActionReplaced || got[runtime.RolePostgres] != ActionKept {
 		t.Fatalf("actions = %v", got)
 	}
 	odoo := f.name(first, runtime.RoleOdoo)
@@ -503,7 +528,8 @@ func TestUpReportsNotReadyWithLogs(t *testing.T) {
 	engine.exitOnStart = runtime.RoleOdoo
 	f := newLifecycle(t, engine, "")
 	_, err := f.up(false)
-	if !errors.Is(err, ErrNotReady) || !strings.Contains(err.Error(), "database is gone") ||
+	// The log lines are the wait step's output (TestUpNotReadyReportsLogsAsWaitOutput).
+	if !errors.Is(err, ErrNotReady) || !strings.Contains(err.Error(), "stopped") ||
 		!strings.Contains(err.Error(), "completed before the failure") {
 		t.Fatalf("stopped odoo: %v", err)
 	}
@@ -565,7 +591,7 @@ func TestDownKeepsVolumesAndStatusObserves(t *testing.T) {
 	}
 
 	// Data survives: the next up keeps the volumes.
-	if got := actions(f.mustUp()); got[runtime.RolePostgresData] != actionKept || got[runtime.RoleOdoo] != actionCreated {
+	if got := actions(f.mustUp()); got[runtime.RolePostgresData] != ActionKept || got[runtime.RoleOdoo] != ActionCreated {
 		t.Fatalf("up after down = %v", got)
 	}
 }
@@ -585,9 +611,9 @@ func TestPlanUpTable(t *testing.T) {
 		t.Fatalf("empty: %d steps, %v", len(steps), err)
 	}
 	odoo := desired.Odoo
-	for state, want := range map[runtime.ContainerState]string{
-		runtime.ContainerRunning: actionKept, runtime.ContainerExited: actionStarted,
-		runtime.ContainerCreated: actionStarted, runtime.ContainerOther: actionReplaced,
+	for state, want := range map[runtime.ContainerState]Action{
+		runtime.ContainerRunning: ActionKept, runtime.ContainerExited: ActionStarted,
+		runtime.ContainerCreated: ActionStarted, runtime.ContainerOther: ActionReplaced,
 	} {
 		o := empty
 		o.containers = map[string]*runtime.ContainerInfo{odoo.Spec.Name: {ID: "x", Name: odoo.Spec.Name, Labels: odoo.Spec.Labels, State: state}}
@@ -603,7 +629,7 @@ func TestPlanUpTable(t *testing.T) {
 	stale[runtime.LabelSpec] = "sha256:" + strings.Repeat("f", 64)
 	o := empty
 	o.containers = map[string]*runtime.ContainerInfo{odoo.Spec.Name: {ID: "x", Name: odoo.Spec.Name, Labels: stale, State: runtime.ContainerRunning}}
-	if steps, err := planUp(desired, o, id); err != nil || steps[4].action != actionReplaced {
+	if steps, err := planUp(desired, o, id); err != nil || steps[4].action != ActionReplaced {
 		t.Errorf("changed spec: %+v, %v", steps, err)
 	}
 }
