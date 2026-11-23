@@ -1,7 +1,6 @@
 package app
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"slices"
@@ -51,16 +50,16 @@ func (f *lifecycleFixture) listing(out string) {
 	}
 }
 
-func (f *lifecycleFixture) shell(db string) (string, error) {
-	var notice bytes.Buffer
-	_, err := f.service.Shell(context.Background(), ShellRequest{Selector: f.selector, Database: db, Session: Session{Notice: &notice}})
-	return notice.String(), err
+func (f *lifecycleFixture) shell(db string) ([]Event, error) {
+	var r recorder
+	_, err := f.service.Shell(context.Background(), ShellRequest{Selector: f.selector, Database: db, Session: Session{Reporter: &r}})
+	return r.all(), err
 }
 
-func (f *lifecycleFixture) psql(db string) (string, error) {
-	var notice bytes.Buffer
-	_, err := f.service.Psql(context.Background(), PsqlRequest{Selector: f.selector, Database: db, Session: Session{Notice: &notice}})
-	return notice.String(), err
+func (f *lifecycleFixture) psql(db string) ([]Event, error) {
+	var r recorder
+	_, err := f.service.Psql(context.Background(), PsqlRequest{Selector: f.selector, Database: db, Session: Session{Reporter: &r}})
+	return r.all(), err
 }
 
 func (f *lifecycleFixture) lastSession() sessionCall {
@@ -79,8 +78,12 @@ func TestDatabaseSelection(t *testing.T) {
 	t.Run("explicit", func(t *testing.T) {
 		f.engine.execCalls = nil
 		f.listing("other\n")
-		if _, err := f.shell("x"); err != nil {
+		events, err := f.shell("x")
+		if err != nil {
 			t.Fatal(err)
+		}
+		if len(events) != 0 {
+			t.Fatalf("events with -d = %#v, want none", events)
 		}
 		if len(f.engine.execCalls) != 0 {
 			t.Fatalf("an explicit database was listed: %+v", f.engine.execCalls)
@@ -92,12 +95,12 @@ func TestDatabaseSelection(t *testing.T) {
 	t.Run("one", func(t *testing.T) {
 		f.engine.execCalls = nil
 		f.listing("prod\n")
-		notice, err := f.shell("")
+		events, err := f.shell("")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(notice, `using database "prod"`) {
-			t.Fatalf("notice = %q", notice)
+		if !slices.Equal(events, []Event{DatabaseSelected{Name: "prod"}}) {
+			t.Fatalf("events = %#v, want DatabaseSelected prod", events)
 		}
 		if cmd := f.lastSession().req.Cmd; !slices.Equal(cmd[len(cmd)-2:], []string{"-d", "prod"}) {
 			t.Fatalf("shell command = %q", cmd)
@@ -124,7 +127,7 @@ func TestDatabaseSelection(t *testing.T) {
 	})
 	t.Run("several", func(t *testing.T) {
 		f.listing("a\nb\n")
-		for _, run := range []func(string) (string, error){f.shell, f.psql} {
+		for _, run := range []func(string) ([]Event, error){f.shell, f.psql} {
 			if _, err := run(""); !errors.Is(err, ErrDatabase) || !strings.Contains(err.Error(), `"a"`) || !strings.Contains(err.Error(), `"b"`) {
 				t.Fatalf("several databases = %v, want ErrDatabase listing a and b", err)
 			}

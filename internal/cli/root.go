@@ -152,6 +152,13 @@ func (g *globalFlags) reporter() app.Reporter {
 	return g.present.Reporter()
 }
 
+// setRaw tells the presenter whether the terminal is in raw mode.
+func (g *globalFlags) setRaw(raw bool) {
+	if g.present != nil {
+		g.present.SetRaw(raw)
+	}
+}
+
 // warn echoes result warnings through the presenter.
 func (g *globalFlags) warn(messages []string) {
 	if g.present != nil {

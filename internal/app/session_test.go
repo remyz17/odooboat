@@ -23,6 +23,8 @@ type fakeSession struct {
 	signals  []runtime.Signal
 	resizes  []runtime.TerminalSize
 	closed   bool
+	// resizeErr fails every resize.
+	resizeErr error
 }
 
 func newFakeSession(exitOn map[runtime.Signal]int) *fakeSession {
@@ -42,7 +44,7 @@ func (s *fakeSession) Resize(_ context.Context, size runtime.TerminalSize) error
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.resizes = append(s.resizes, size)
-	return nil
+	return s.resizeErr
 }
 
 func (s *fakeSession) Signal(_ context.Context, sig runtime.Signal) error {
@@ -316,5 +318,30 @@ func TestExecRunsThroughEntrypointOnlyInOdoo(t *testing.T) {
 		if got := f.engine.sessionCalls[len(f.engine.sessionCalls)-1].req.Cmd; !slices.Equal(got, want) {
 			t.Errorf("%s: command = %q, want %q", role, got, want)
 		}
+	}
+}
+
+func TestSessionReportsDegradedResize(t *testing.T) {
+	f := newLifecycle(t, newResourceEngine(t), "")
+	f.mustUp()
+	session := newFakeSession(nil)
+	session.resizeErr = errors.New("no such exec")
+	f.engine.nextSession = session
+	resizes := make(chan TerminalSize)
+	var r recorder
+	done := f.startExec(context.Background(), Session{TTY: true, Resizes: resizes, Reporter: &r})
+	resizes <- TerminalSize{Width: 80, Height: 24}
+	resizes <- TerminalSize{Width: 81, Height: 24} // the first one was handled
+	session.exit(0)
+	if run := receive(t, done); run.err != nil {
+		t.Fatalf("session failed: %v", run.err)
+	}
+	events := r.all()
+	if len(events) == 0 {
+		t.Fatal("no event")
+	}
+	degraded, ok := events[0].(SessionDegraded)
+	if !ok || degraded.Operation != SessionResize || degraded.Err == nil {
+		t.Fatalf("events = %#v", events)
 	}
 }

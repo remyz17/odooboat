@@ -217,7 +217,7 @@ func TestWithEnvironmentReportsLockWaiting(t *testing.T) {
 }
 
 // wordingFields are field names that may not be io.Writers in app.
-var wordingFields = []string{"Progress"}
+var wordingFields = []string{"Progress", "Notice"}
 
 // TestNoProgressWriterInApp keeps progress and notice wording out of the
 // application: no io.Writer field may be named Progress or Notice.

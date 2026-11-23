@@ -53,8 +53,9 @@ type Session struct {
 	Stderr  io.Writer
 	Resizes <-chan TerminalSize
 	Signals <-chan Signal
-	// Notice receives Odooboat's own messages, never the command's output.
-	Notice io.Writer
+	// Reporter receives Odooboat's own events around the stream, such as the
+	// database chosen or a resize that failed; nil discards them.
+	Reporter Reporter
 }
 
 type ExecRequest struct {
@@ -113,9 +114,10 @@ func (b boundEnvironment) exec(ctx context.Context, role runtime.Role, req runti
 // When ctx is cancelled, the client is gone: the command is sent SIGTERM,
 // then SIGKILL, and Odooboat reports whether it stopped (ADR 0010 §7).
 func runSession(ctx context.Context, store runtime.SessionStore, containerID string, req runtime.ExecRequest, s Session) (SessionResult, error) {
-	notice := s.Notice
-	if notice == nil {
-		notice = io.Discard
+	report := func(e Event) {
+		if s.Reporter != nil {
+			s.Reporter.Report(e)
+		}
 	}
 	req.Stdin, req.Stdout, req.Stderr, req.TTY, req.Size = s.Stdin, s.Stdout, s.Stderr, s.TTY, s.Size
 	session, err := store.StartExec(ctx, containerID, req)
@@ -150,7 +152,7 @@ func runSession(ctx context.Context, store runtime.SessionStore, containerID str
 			return SessionResult{ExitCode: o.result.ExitCode}, nil
 		case size := <-s.Resizes:
 			if err := session.Resize(detached, size); err != nil {
-				fmt.Fprintln(notice, "odooboat: resize:", err)
+				report(SessionDegraded{Operation: SessionResize, Err: err})
 			}
 		case sig := <-signals:
 			if sig == runtime.SignalInt {
@@ -159,7 +161,7 @@ func runSession(ctx context.Context, store runtime.SessionStore, containerID str
 				}
 			}
 			if err := session.Signal(detached, sig); err != nil {
-				fmt.Fprintln(notice, "odooboat: forward signal:", err)
+				report(SessionDegraded{Operation: SessionSignal, Err: err})
 			}
 		case <-ctx.Done():
 			return terminate(detached, session, exited, ctx.Err())
