@@ -16,9 +16,11 @@ import (
 
 // fakeAccess records requests and answers with result, err, or a panic.
 type fakeAccess struct {
-	result  app.SessionResult
-	err     error
-	panics  bool
+	result app.SessionResult
+	err    error
+	panics bool
+	// selects is reported as the chosen database.
+	selects string
 	logs    []app.LogsRequest
 	execs   []app.ExecRequest
 	shells  []app.ShellRequest
@@ -29,6 +31,9 @@ type fakeAccess struct {
 func (f *fakeAccess) answer(s app.Session) (app.SessionResult, error) {
 	if f.panics {
 		panic("session exploded")
+	}
+	if f.selects != "" && s.Reporter != nil {
+		s.Reporter.Report(app.DatabaseSelected{Name: f.selects})
 	}
 	if s.Stdout != nil && f.written != "" {
 		fmt.Fprint(s.Stdout, f.written)
@@ -220,5 +225,16 @@ func TestShellHelpDocumentsRollback(t *testing.T) {
 	r := runAccess(t, &fakeAccess{}, nil, "shell", "--help")
 	if !strings.Contains(r.stdout, "env.cr.commit()") || !strings.Contains(r.stdout, "rolled back") {
 		t.Fatalf("shell help = %q", r.stdout)
+	}
+}
+
+func TestRawSessionNoticeUsesCRLF(t *testing.T) {
+	access := &fakeAccess{selects: "db", err: app.ErrDatabase}
+	r := runAccess(t, access, &fakeTerminal{}, "--progress=plain", "shell")
+	if !strings.Contains(r.stderr, "using database \"db\"\r\n") {
+		t.Fatalf("stderr %q lacks the notice in raw mode", r.stderr)
+	}
+	if !strings.HasSuffix(r.stderr, "selection failed\n") || strings.HasSuffix(r.stderr, "\r\n") {
+		t.Fatalf("stderr %q: the error after the session must end with a plain newline", r.stderr)
 	}
 }

@@ -1,11 +1,9 @@
 package cli
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"strconv"
 	"time"
 
@@ -43,22 +41,12 @@ func afterDash(cmd *cobra.Command, args []string) ([]string, error) {
 	return args, nil
 }
 
-// crlf turns "\n" into "\r\n" for Odooboat's own messages while the local
-// terminal is in raw mode.
-type crlf struct{ w io.Writer }
-
-func (c crlf) Write(p []byte) (int, error) {
-	if _, err := c.w.Write(bytes.ReplaceAll(p, []byte("\n"), []byte("\r\n"))); err != nil {
-		return 0, err
-	}
-	return len(p), nil
-}
-
 // newSession prepares the local side of a session. With a TTY the terminal
 // is switched to raw mode; cleanup restores it and must run on every path.
 // Without one, signals are captured for forwarding (ADR 0010 §3, §7).
-func newSession(deps Dependencies, noTTY bool) (app.Session, func(), error) {
-	s := app.Session{Stdin: deps.Stdin, Stdout: deps.Stdout, Stderr: deps.Stderr, Notice: deps.Stderr}
+// While the terminal is raw, the presenter writes "\r\n" line endings.
+func newSession(deps Dependencies, global *globalFlags, noTTY bool) (app.Session, func(), error) {
+	s := app.Session{Stdin: deps.Stdin, Stdout: deps.Stdout, Stderr: deps.Stderr, Reporter: global.reporter()}
 	terminal := deps.terminal()
 	if noTTY || !terminal.Interactive() {
 		if deps.Interrupts == nil {
@@ -76,18 +64,20 @@ func newSession(deps Dependencies, noTTY bool) (app.Session, func(), error) {
 	if err != nil {
 		return s, nil, fmt.Errorf("switch terminal to raw mode: %w", err)
 	}
+	global.setRaw(true)
 	resizes, stopResizes := terminal.Resizes()
-	s.TTY, s.Size, s.Resizes, s.Notice = true, size, resizes, crlf{deps.Stderr}
+	s.TTY, s.Size, s.Resizes = true, size, resizes
 	return s, func() {
 		stopResizes()
+		global.setRaw(false)
 		_ = restore()
 	}, nil
 }
 
 // session runs one access command with its local session; a remote
 // non-zero exit becomes the process's exit code.
-func session(deps Dependencies, noTTY bool, run func(app.Session) (app.SessionResult, error)) error {
-	s, cleanup, err := newSession(deps, noTTY)
+func session(deps Dependencies, global *globalFlags, noTTY bool, run func(app.Session) (app.SessionResult, error)) error {
+	s, cleanup, err := newSession(deps, global, noTTY)
 	if err != nil {
 		return err
 	}
@@ -189,7 +179,7 @@ func newExecCommand(deps Dependencies, global *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return session(deps, noTTY, func(s app.Session) (app.SessionResult, error) {
+			return session(deps, global, noTTY, func(s app.Session) (app.SessionResult, error) {
 				return deps.access().Exec(cmd.Context(), app.ExecRequest{Selector: global.selector(cmd, deps), Role: role,
 					User: user, Cmd: args, Session: s})
 			})
@@ -223,7 +213,7 @@ func newShellCommand(deps Dependencies, global *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return session(deps, noTTY, func(s app.Session) (app.SessionResult, error) {
+			return session(deps, global, noTTY, func(s app.Session) (app.SessionResult, error) {
 				return deps.access().Shell(cmd.Context(), app.ShellRequest{Selector: global.selector(cmd, deps),
 					Database: database, Args: odooArgs, Session: s})
 			})
@@ -252,7 +242,7 @@ func newPsqlCommand(deps Dependencies, global *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return session(deps, noTTY, func(s app.Session) (app.SessionResult, error) {
+			return session(deps, global, noTTY, func(s app.Session) (app.SessionResult, error) {
 				return deps.access().Psql(cmd.Context(), app.PsqlRequest{Selector: global.selector(cmd, deps),
 					Database: database, Args: psqlArgs, Session: s})
 			})

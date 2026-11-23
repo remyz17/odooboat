@@ -111,8 +111,8 @@ func (b boundEnvironment) database(ctx context.Context, requested string, mainte
 	names := parseDatabases(out.String())
 	switch {
 	case len(names) == 1:
-		if s.Notice != nil {
-			fmt.Fprintf(s.Notice, "odooboat: using database %q\n", names[0])
+		if s.Reporter != nil {
+			s.Reporter.Report(DatabaseSelected{Name: names[0]})
 		}
 		return names[0], nil
 	case len(names) > 1:
