@@ -94,3 +94,35 @@ func TestSecondInterruptExits(t *testing.T) {
 		t.Fatal("a second uncaptured signal did not exit")
 	}
 }
+
+// A TTY session captures no signal, but its termination (ADR 0010 §7) must
+// not be cut short by a second one.
+func TestHoldSuppressesSecondInterruptExit(t *testing.T) {
+	exited := make(chan int, 1)
+	ctx, interrupts, stop := watchSignals(context.Background(), func(code int) { exited <- code })
+	defer stop()
+
+	release := interrupts.Hold()
+	raise(t, syscall.SIGHUP)
+	select {
+	case <-ctx.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("a signal during a held session did not cancel the context")
+	}
+	raise(t, syscall.SIGHUP)
+	select {
+	case code := <-exited:
+		t.Fatalf("exited %d while a session held the exit", code)
+	case <-time.After(200 * time.Millisecond):
+	}
+	release()
+	raise(t, syscall.SIGHUP)
+	select {
+	case code := <-exited:
+		if code != ExitInterrupted {
+			t.Fatalf("exit %d", code)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("after release, a second signal did not exit")
+	}
+}

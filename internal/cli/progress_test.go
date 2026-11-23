@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -267,3 +268,54 @@ func TestInterruptedErrorMessage(t *testing.T) {
 		t.Fatalf("wrapped cancellation keeps its context: stderr %q", stderr)
 	}
 }
+
+// With 2>&1, a warning echoed on stderr comes before the result, as it did
+// before progress went through the queue.
+func TestWarningsPrecedeResult(t *testing.T) {
+	root, base := cliStateProject(t)
+	var both lockedBuffer
+	// A slow terminal: without a flush, the result would overtake the warning.
+	slow := writerFunc(func(p []byte) (int, error) {
+		time.Sleep(20 * time.Millisecond)
+		return both.Write(p)
+	})
+	deps := Dependencies{WorkingDir: root, Stdout: &both, Stderr: slow, Config: app.NewConfigService(),
+		Workspace: app.NewWorkspaceService(statefile.New(), statefile.New(), runtime.Connectors{}, "test")}
+	for range 3 {
+		both.Reset()
+		if code, _ := runCLI(t, deps, nil, append(base, "status", "--progress=plain")...); code != ExitOK {
+			t.Fatalf("exit %d", code)
+		}
+		if out := both.String(); !strings.HasPrefix(out, "warning: ") {
+			t.Fatalf("output starts %q, want the warning first", out[:min(len(out), 40)])
+		}
+	}
+}
+
+// lockedBuffer is a bytes.Buffer safe for the presenter's goroutine.
+type lockedBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (l *lockedBuffer) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *lockedBuffer) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
+}
+
+func (l *lockedBuffer) Reset() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.b.Reset()
+}
+
+type writerFunc func([]byte) (int, error)
+
+func (f writerFunc) Write(p []byte) (int, error) { return f(p) }

@@ -198,7 +198,7 @@ func TestJSONIgnoresTicksAndWarnings(t *testing.T) {
 func TestPlainOutputPrefixIsShort(t *testing.T) {
 	for name, want := range map[string]string{
 		"[builder 4/4] RUN set -eux; venv=/opt/odooboat/venv/bin/python; pip() { uv tool run }": "[builder 4/4]",
-		"ob-shop-dev-odoo-1a2b3c4d": "ob-shop-dev-odoo-1a2b3c4d",
+		"ob-shop-dev-odoo-1a2b3c4d":                                        "ob-shop-dev-odoo-1a2b3c4d",
 		"exporting to image with a name long enough to need cutting short": "exporting to image with a name long e...",
 	} {
 		var b bytes.Buffer
