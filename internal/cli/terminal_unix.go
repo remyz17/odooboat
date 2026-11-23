@@ -12,13 +12,15 @@ import (
 )
 
 type fileTerminal struct {
-	stdin, stdout *os.File
+	stdin, stdout, stderr *os.File
 }
 
-// NewTerminal returns the terminal on stdin and stdout.
-func NewTerminal(stdin, stdout *os.File) Terminal {
-	return fileTerminal{stdin: stdin, stdout: stdout}
+// NewTerminal returns the terminal on stdin, stdout, and stderr.
+func NewTerminal(stdin, stdout, stderr *os.File) Terminal {
+	return fileTerminal{stdin: stdin, stdout: stdout, stderr: stderr}
 }
+
+func (t fileTerminal) StderrIsTerminal() bool { return term.IsTerminal(int(t.stderr.Fd())) }
 
 func (t fileTerminal) Interactive() bool {
 	return term.IsTerminal(int(t.stdin.Fd())) && term.IsTerminal(int(t.stdout.Fd()))

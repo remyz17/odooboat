@@ -1,9 +1,6 @@
 package cli
 
 import (
-	"fmt"
-	"time"
-
 	"github.com/remyz17/odooboat/internal/app"
 	"github.com/spf13/cobra"
 )
@@ -69,9 +66,7 @@ func newEnvironmentVerifyCommand(deps Dependencies, global *globalFlags) *cobra.
 			selector := global.selector(cmd, deps)
 			result, err := deps.Workspace.VerifyEnvironment(cmd.Context(), app.EnvironmentVerifyRequest{
 				Selector: selector,
-				Wait: app.WaitOptions{Policy: app.Wait, OnWait: func(holder *app.LockHolder) {
-					fmt.Fprintln(deps.Stderr, waitingMessage(holder))
-				}},
+				Wait:     global.waitOptions(),
 			})
 			if err != nil {
 				return err
@@ -99,10 +94,8 @@ func newEnvironmentBuildCommand(deps Dependencies, global *globalFlags) *cobra.C
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			result, err := deps.Workspace.BuildEnvironment(cmd.Context(), app.EnvironmentBuildRequest{
 				Selector: global.selector(cmd, deps),
-				Wait: app.WaitOptions{Policy: app.Wait, OnWait: func(holder *app.LockHolder) {
-					fmt.Fprintln(deps.Stderr, waitingMessage(holder))
-				}},
-				Pull: pull, Progress: deps.Stderr,
+				Wait:     global.waitOptions(),
+				Pull:     pull, Progress: deps.Stderr,
 			})
 			if err != nil {
 				return err
@@ -117,12 +110,4 @@ func newEnvironmentBuildCommand(deps Dependencies, global *globalFlags) *cobra.C
 	cmd.Flags().BoolVar(&pull, "pull", false, "pull the base image, pinned by digest, if it is missing")
 	addOverrideFlags(cmd)
 	return cmd
-}
-
-func waitingMessage(holder *app.LockHolder) string {
-	if holder == nil {
-		return "odooboat: waiting for the environment lock held by an unknown process"
-	}
-	return fmt.Sprintf("odooboat: waiting for the environment lock held by %q (pid %d on %s since %s)",
-		holder.Operation, holder.PID, holder.Host, holder.StartedAt.Local().Format(time.TimeOnly))
 }

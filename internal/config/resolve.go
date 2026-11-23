@@ -39,6 +39,27 @@ func Resolve(opts Options) (Result, error) {
 	return resolveSources(sources, opts.Patch)
 }
 
+// ResolvePreferences resolves the preferences from the user document alone,
+// discovered as Resolve discovers it. It never reads the project, so the CLI
+// can choose its presentation before a command resolves anything else.
+func ResolvePreferences(opts Options) (ResolvedPreferences, error) {
+	workingDir, err := workingDirectory(opts.WorkingDir)
+	if err != nil {
+		return ResolvedPreferences{}, err
+	}
+	path, err := discoverUser(workingDir, opts.UserConfigPath)
+	if err != nil {
+		return ResolvedPreferences{}, err
+	}
+	var user *loaded[UserDocument]
+	if path != "" {
+		if user, err = decodeFile[UserDocument](SourceUser, path); err != nil {
+			return ResolvedPreferences{}, err
+		}
+	}
+	return resolvePreferences(Provenance{}, user), nil
+}
+
 func resolveSources(sources Sources, patch InvocationPatch) (Result, error) {
 	user, project, local, err := decodeSources(sources)
 	if err != nil {

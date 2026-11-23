@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"fmt"
-
 	"github.com/remyz17/odooboat/internal/app"
 	"github.com/spf13/cobra"
 )
@@ -23,14 +21,12 @@ func newUpCommand(deps Dependencies, global *globalFlags) *cobra.Command {
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			result, err := deps.Workspace.Up(cmd.Context(), app.UpRequest{
-				Selector: global.selector(cmd, deps), Wait: waitOptions(deps), Pull: pull, Progress: deps.Stderr,
+				Selector: global.selector(cmd, deps), Wait: global.waitOptions(), Pull: pull, Progress: deps.Stderr,
 			})
 			if err != nil {
 				return err
 			}
-			for _, warning := range result.Warnings {
-				fmt.Fprintln(deps.Stderr, "odooboat: warning:", warning)
-			}
+			global.warn(result.Warnings)
 			format, err := global.formatOf(result.Preferences)
 			if err != nil {
 				return err
@@ -50,7 +46,7 @@ func newDownCommand(deps Dependencies, global *globalFlags) *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			result, err := deps.Workspace.Down(cmd.Context(), app.DownRequest{
-				Selector: global.selector(cmd, deps), Wait: waitOptions(deps), Progress: deps.Stderr,
+				Selector: global.selector(cmd, deps), Wait: global.waitOptions(), Progress: deps.Stderr,
 			})
 			if err != nil {
 				return err
@@ -76,6 +72,7 @@ func newStatusCommand(deps Dependencies, global *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			global.warn(result.Warnings)
 			format, err := global.formatOf(result.Preferences)
 			if err != nil {
 				return err
@@ -87,8 +84,11 @@ func newStatusCommand(deps Dependencies, global *globalFlags) *cobra.Command {
 	return cmd
 }
 
-func waitOptions(deps Dependencies) app.WaitOptions {
+// waitOptions waits for the lock and reports the wait as an event.
+func (g *globalFlags) waitOptions() app.WaitOptions {
 	return app.WaitOptions{Policy: app.Wait, OnWait: func(holder *app.LockHolder) {
-		fmt.Fprintln(deps.Stderr, waitingMessage(holder))
+		if r := g.reporter(); r != nil {
+			r.Report(app.LockWaiting{Holder: holder})
+		}
 	}}
 }

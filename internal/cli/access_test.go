@@ -67,7 +67,8 @@ type fakeTerminal struct {
 	raw, restored int
 }
 
-func (t *fakeTerminal) Interactive() bool { return true }
+func (t *fakeTerminal) Interactive() bool      { return true }
+func (t *fakeTerminal) StderrIsTerminal() bool { return false }
 func (t *fakeTerminal) Size() (app.TerminalSize, error) {
 	return app.TerminalSize{Width: 120, Height: 40}, nil
 }
