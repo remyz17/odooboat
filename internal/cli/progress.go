@@ -80,8 +80,13 @@ func (p *presenter) Flush() { p.queue.Flush() }
 // Fail writes err as the invocation's last record, then closes. usage is
 // the command's usage text, printed only by plain progress.
 func (p *presenter) Fail(err error, usage string) {
+	message := err.Error()
+	if message == context.Canceled.Error() {
+		// A bare cancellation is the user's interrupt, not a failure to explain.
+		message = "interrupted"
+	}
 	p.queue.Post(ui.Record{Time: p.now(), Event: ui.ErrorReport{
-		Code: ErrorCode(err), Message: err.Error(), Hint: app.Hint(err), Usage: usage,
+		Code: ErrorCode(err), Message: message, Hint: app.Hint(err), Usage: usage,
 	}})
 	p.Close()
 }

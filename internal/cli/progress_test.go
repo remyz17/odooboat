@@ -254,3 +254,16 @@ func TestResolveFormatWiring(t *testing.T) {
 		t.Fatal("result format name changed")
 	}
 }
+
+func TestInterruptedErrorMessage(t *testing.T) {
+	cancelled := func(err error) []*cobra.Command {
+		return []*cobra.Command{emitting("stops", func(*presenter) error { return err })}
+	}
+	if _, stderr := runCLI(t, Dependencies{}, cancelled(context.Canceled), "stops"); stderr != "error: interrupted\n" {
+		t.Fatalf("bare cancellation: stderr %q", stderr)
+	}
+	wrapped := fmt.Errorf("pull x: %w", context.Canceled)
+	if _, stderr := runCLI(t, Dependencies{}, cancelled(wrapped), "stops"); stderr != "error: pull x: context canceled\n" {
+		t.Fatalf("wrapped cancellation keeps its context: stderr %q", stderr)
+	}
+}
