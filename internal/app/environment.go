@@ -145,6 +145,8 @@ func connectionSnapshot(value config.ResolvedRuntimeConnection) workspace.Connec
 type EnvironmentVerifyRequest struct {
 	Selector Selector
 	Wait     WaitOptions
+	// Reporter receives a wait for the lock; nil discards it.
+	Reporter Reporter
 }
 
 type EngineReport struct {
@@ -172,7 +174,7 @@ type EnvironmentVerifyResult struct {
 // identity.
 func (s WorkspaceService) VerifyEnvironment(ctx context.Context, req EnvironmentVerifyRequest) (EnvironmentVerifyResult, error) {
 	var result EnvironmentVerifyResult
-	err := s.withEnvironment(ctx, req.Selector, OperationVerify, req.Wait, func(_ context.Context, env LockedEnvironment) error {
+	err := s.withEnvironment(ctx, req.Selector, OperationVerify, req.Wait, req.Reporter, func(_ context.Context, env LockedEnvironment) error {
 		engine := EngineReport{Version: env.EngineInfo.Version, OS: env.EngineInfo.OS, Arch: env.EngineInfo.Arch}
 		if record := env.Binding.Engine; record != nil {
 			engine.Source, engine.Value, engine.Unavailable = record.Source, record.Value, record.Unavailable

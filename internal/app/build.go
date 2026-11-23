@@ -91,7 +91,7 @@ func (s WorkspaceService) BuildEnvironment(ctx context.Context, req EnvironmentB
 	}
 
 	var result EnvironmentBuildResult
-	err = s.withEnvironment(ctx, req.Selector, OperationBuild, req.Wait, func(ctx context.Context, env LockedEnvironment) error {
+	err = s.withEnvironment(ctx, req.Selector, OperationBuild, req.Wait, req.Reporter, func(ctx context.Context, env LockedEnvironment) error {
 		built, err := buildEnvironment(ctx, env, req.Pull, newTracker(req.Reporter))
 		if err != nil {
 			return err
@@ -349,17 +349,4 @@ func pullImage(ctx context.Context, store runtime.ImageStore, ref string, t *tra
 	err := store.PullImage(ctx, ref, t.runtimeProgress(ctx, step.id()))
 	step.finish(ctx, err)
 	return err
-}
-
-// textProgress writes runtime progress as text: a line per layer state and
-// build output as is. It is a bridge until the operations report typed
-// events (ADR 0011 §11 step 1).
-func textProgress(w io.Writer) runtime.ProgressFunc {
-	return func(p runtime.Progress) {
-		if p.Kind == runtime.ProgressLayer {
-			fmt.Fprintf(w, "%s: %s\n", p.Name, p.State)
-			return
-		}
-		_, _ = w.Write(p.Output)
-	}
 }

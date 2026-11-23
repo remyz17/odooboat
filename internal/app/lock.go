@@ -34,8 +34,6 @@ type LockHolder = state.Holder
 
 type WaitOptions struct {
 	Policy WaitPolicy
-	// OnWait reports the holder once while waiting; nil when it is unknown.
-	OnWait func(*LockHolder)
 }
 
 // LockedEnvironment is what a stateful workflow may rely on while the
@@ -59,7 +57,8 @@ type LockedEnvironment struct {
 // withEnvironment is the single entry point of every stateful environment
 // operation (ADR 0006 §4): bind, lock, re-verify, connect, check the engine
 // identity, run fn, release.
-func (s WorkspaceService) withEnvironment(ctx context.Context, sel Selector, op Operation, wait WaitOptions,
+// A wait for the lock is reported to reporter as LockWaiting.
+func (s WorkspaceService) withEnvironment(ctx context.Context, sel Selector, op Operation, wait WaitOptions, reporter Reporter,
 	fn func(context.Context, LockedEnvironment) error) (err error) {
 	resolved, err := config.Resolve(sel.options())
 	if err != nil {
@@ -81,7 +80,11 @@ func (s WorkspaceService) withEnvironment(ctx context.Context, sel Selector, op 
 	}
 
 	lock, err := s.locker.LockEnvironment(ctx, location, binding.ID, state.LockRequest{
-		Holder: s.holder(op, operationID), Policy: state.WaitPolicy(wait.Policy), OnWait: wait.OnWait,
+		Holder: s.holder(op, operationID), Policy: state.WaitPolicy(wait.Policy), OnWait: func(holder *LockHolder) {
+			if reporter != nil {
+				reporter.Report(LockWaiting{Holder: holder})
+			}
+		},
 	})
 	if err != nil {
 		return err
