@@ -4,6 +4,6 @@
 schema: 1
 bases:
   "18.0":
-    "3.10": ghcr.io/remyz17/odooboat/odoo@sha256:f1f33f23346af1d044a9b726f6b1193ac61373276eb57467c7dc50c1a7a11a0a
-    "3.11": ghcr.io/remyz17/odooboat/odoo@sha256:88476d4d3bd7d5bc679ce27ef6b29a466229f9741755290f912118a3e96a2d8a
-    "3.12": ghcr.io/remyz17/odooboat/odoo@sha256:e8691f95d9e2ad9c963edd21a1bdaaaa5868916ab825349a4098e14cd17c7280
+    "3.10": ghcr.io/remyz17/odooboat/odoo@sha256:5baace25acafc5daebb23feeef06c2c0a21ebc4d5ea6d1d445ab68000de4bf5c
+    "3.11": ghcr.io/remyz17/odooboat/odoo@sha256:2417b449140a9964d2c84558de89afb072ad189a08afa645a6c4a857f697155c
+    "3.12": ghcr.io/remyz17/odooboat/odoo@sha256:0138b17984eb8464b651fb94477e587fc0f446d7563788923f9b89446714ec8d
