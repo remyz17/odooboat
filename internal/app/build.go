@@ -39,8 +39,8 @@ type EnvironmentBuildRequest struct {
 	// Pull allows pulling a missing base image, pinned by digest. Without it
 	// a missing base is an error: images are never pulled implicitly.
 	Pull bool
-	// Progress receives pull, fetch, and build progress lines; nil discards.
-	Progress io.Writer
+	// Reporter receives the pull, fetch, and build steps; nil discards them.
+	Reporter Reporter
 }
 
 type BuildBase struct {
@@ -80,10 +80,6 @@ type EnvironmentBuildResult struct {
 // its runtime (ADR 0008 §11, amendment A3). An image whose identity already
 // exists is reused without building.
 func (s WorkspaceService) BuildEnvironment(ctx context.Context, req EnvironmentBuildRequest) (EnvironmentBuildResult, error) {
-	progress := req.Progress
-	if progress == nil {
-		progress = io.Discard
-	}
 	// Configuration-level requirements are checked before the environment is
 	// bound or locked, so a missing source changes nothing.
 	resolved, err := config.Resolve(req.Selector.options())
@@ -96,7 +92,7 @@ func (s WorkspaceService) BuildEnvironment(ctx context.Context, req EnvironmentB
 
 	var result EnvironmentBuildResult
 	err = s.withEnvironment(ctx, req.Selector, OperationBuild, req.Wait, func(ctx context.Context, env LockedEnvironment) error {
-		built, err := buildEnvironment(ctx, env, req.Pull, progress)
+		built, err := buildEnvironment(ctx, env, req.Pull, newTracker(req.Reporter))
 		if err != nil {
 			return err
 		}
@@ -120,7 +116,10 @@ func requireBuildable(cfg config.ResolvedConfig) error {
 	return nil
 }
 
-func buildEnvironment(ctx context.Context, env LockedEnvironment, pull bool, progress io.Writer) (EnvironmentBuildResult, error) {
+// buildEnvironment reports a pull step when it pulls the base, a fetch step
+// per embedded source, and a build step that is reused or nests the
+// builder's steps.
+func buildEnvironment(ctx context.Context, env LockedEnvironment, pull bool, t *tracker) (EnvironmentBuildResult, error) {
 	cfg := env.Config
 	// The configuration was resolved again under the lock; it may have
 	// changed since the first check.
@@ -134,7 +133,7 @@ func buildEnvironment(ctx context.Context, env LockedEnvironment, pull bool, pro
 			ErrRuntimeUnsupported, env.Binding.Connection.Alias)
 	}
 
-	base, from, err := prepareBase(ctx, env, store, pull, progress)
+	base, from, err := prepareBase(ctx, env, store, pull, t)
 	if err != nil {
 		return EnvironmentBuildResult{}, err
 	}
@@ -155,13 +154,13 @@ func buildEnvironment(ctx context.Context, env LockedEnvironment, pull bool, pro
 	}
 
 	src := cfg.Odoo.Source
-	community, err := prepareSource(ctx, envimage.Community, *src.Community, cfg.OdooVersion, work, &spec, progress)
+	community, err := prepareSource(ctx, envimage.Community, *src.Community, cfg.OdooVersion, work, &spec, t)
 	if err != nil {
 		return EnvironmentBuildResult{}, err
 	}
 	result.Community = community
 	if src.Enterprise != nil {
-		enterprise, err := prepareSource(ctx, envimage.Enterprise, *src.Enterprise, cfg.OdooVersion, work, &spec, progress)
+		enterprise, err := prepareSource(ctx, envimage.Enterprise, *src.Enterprise, cfg.OdooVersion, work, &spec, t)
 		if err != nil {
 			return EnvironmentBuildResult{}, err
 		}
@@ -174,27 +173,30 @@ func buildEnvironment(ctx context.Context, env LockedEnvironment, pull bool, pro
 	}
 	result.Identity, result.Image = plan.Identity, plan.Tag()
 
+	step := t.start("", StepBuild, Subject{Kind: ResourceImage, Name: plan.Tag()})
 	if existing, err := store.InspectImage(ctx, plan.Tag()); err == nil {
 		if metadata, err := runtime.DecodeImageMetadata(existing.Labels); err == nil && metadata.Inputs == plan.Identity {
-			fmt.Fprintf(progress, "environment image %s is up to date\n", plan.Tag())
+			step.finishAs(OutcomeReused)
 			result.ImageID, result.Reused = existing.ID, true
 			return result, nil
 		}
 		// A tag is only an index: an image whose label disagrees is rebuilt.
 	} else if !errors.Is(err, runtime.ErrImageNotFound) {
+		step.finish(ctx, err)
 		return EnvironmentBuildResult{}, err
 	}
 
-	fmt.Fprintf(progress, "building environment image %s\n", plan.Tag())
 	built, err := buildFromContext(plan.WriteContext, func(context io.Reader) (runtime.BuiltImage, error) {
 		return builder.BuildImage(ctx, runtime.BuildRequest{
-			Context: context, Tags: []string{plan.Tag()}, Labels: plan.Metadata(base.Reference).Labels(), Progress: textProgress(progress),
+			Context: context, Tags: []string{plan.Tag()}, Labels: plan.Metadata(base.Reference).Labels(),
+			Progress: t.runtimeProgress(ctx, step.id()),
 		})
 	})
-	if err != nil {
-		return EnvironmentBuildResult{}, err
+	if err == nil {
+		err = deliver(built, env)
 	}
-	if err := deliver(built, env); err != nil {
+	step.finish(ctx, err)
+	if err != nil {
 		return EnvironmentBuildResult{}, err
 	}
 	result.ImageID = built.ID
@@ -227,7 +229,7 @@ func buildFromContext(write func(io.Writer) error, build func(io.Reader) (runtim
 // prepareBase finds the base image in the runtime, pulling it only when
 // allowed, and checks that its metadata matches the configuration (ADR 0008
 // §7). It returns the reference the Dockerfile builds FROM.
-func prepareBase(ctx context.Context, env LockedEnvironment, store runtime.ImageStore, pull bool, progress io.Writer) (BuildBase, string, error) {
+func prepareBase(ctx context.Context, env LockedEnvironment, store runtime.ImageStore, pull bool, t *tracker) (BuildBase, string, error) {
 	cfg := env.Config
 	ref := cfg.BaseImage
 	local := strings.HasPrefix(ref, "sha256:")
@@ -247,8 +249,7 @@ func prepareBase(ctx context.Context, env LockedEnvironment, store runtime.Image
 		if !env.Engine.Capabilities().Has(runtime.CapImagePull) {
 			return BuildBase{}, "", fmt.Errorf("%w: runtime connection %q cannot pull images", ErrRuntimeUnsupported, env.Binding.Connection.Alias)
 		}
-		fmt.Fprintf(progress, "pulling base image %s\n", ref)
-		if err := store.PullImage(ctx, ref, textProgress(progress)); err != nil {
+		if err := pullImage(ctx, store, ref, t); err != nil {
 			return BuildBase{}, "", err
 		}
 		if info, err = store.InspectImage(ctx, ref); err != nil {
@@ -292,13 +293,15 @@ func prepareBase(ctx context.Context, env LockedEnvironment, store runtime.Image
 // prepareSource checks one source's series and records its requirements in
 // the spec; an embedded source is exported first (ADR 0008 §8 and §9).
 func prepareSource(ctx context.Context, edition string, location config.ResolvedSourceLocation, series, work string,
-	spec *envimage.Spec, progress io.Writer) (BuildSource, error) {
+	spec *envimage.Spec, t *tracker) (BuildSource, error) {
 	dir := location.Path
 	report := BuildSource{Path: location.Path, Git: location.Git, Commit: location.Commit}
 	if location.Mode() == config.SourceModeEmbedded {
 		dir = filepath.Join(work, edition)
-		fmt.Fprintf(progress, "fetching %s source %s at %s\n", edition, location.Git, location.Commit)
-		if err := git.Export(ctx, location.Git, location.Commit, dir); err != nil {
+		step := t.start("", StepFetch, Subject{Kind: ResourceSource, Name: edition})
+		err := git.Export(ctx, location.Git, location.Commit, dir)
+		step.finish(ctx, err)
+		if err != nil {
 			return BuildSource{}, fmt.Errorf("%s source: %w", edition, err)
 		}
 		spec.Embedded[edition] = envimage.Embedded{Git: location.Git, Commit: location.Commit, Dir: dir}
@@ -338,6 +341,14 @@ func deliver(built runtime.BuiltImage, env LockedEnvironment) error {
 			ErrRuntimeUnsupported, built.ID, built.Engine.Source, built.Engine.Value)
 	}
 	return nil
+}
+
+// pullImage pulls ref as a step whose layers are nested steps.
+func pullImage(ctx context.Context, store runtime.ImageStore, ref string, t *tracker) error {
+	step := t.start("", StepPull, Subject{Kind: ResourceImage, Name: ref})
+	err := store.PullImage(ctx, ref, t.runtimeProgress(ctx, step.id()))
+	step.finish(ctx, err)
+	return err
 }
 
 // textProgress writes runtime progress as text: a line per layer state and

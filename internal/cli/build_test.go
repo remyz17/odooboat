@@ -140,7 +140,7 @@ func TestEnvironmentBuildCommand(t *testing.T) {
 	engine := newImageStub()
 	engine.images[stubLocalBase] = stubBaseInfo(stubLocalBase)
 	root, base := buildProject(t, stubLocalBase, "community-18.0")
-	args := append(append([]string{}, base...), "environment", "build", "--output", "json")
+	args := append(append([]string{}, base...), "environment", "build", "--output", "json", "--progress", "plain")
 
 	first := executeWith(t, imageStubConnector{engine}, root, args...)
 	if first.err != nil {
@@ -154,13 +154,13 @@ func TestEnvironmentBuildCommand(t *testing.T) {
 		built.Community.Series != "18.0" || !strings.HasPrefix(built.Image, "odooboat/environment:") || engine.builds != 1 {
 		t.Fatalf("first build = %+v (builds %d)", built, engine.builds)
 	}
-	for _, line := range []string{"building environment image " + built.Image, "#1 stub build step"} {
-		if !strings.Contains(first.stderr, line) {
-			t.Errorf("stderr lacks %q:\n%s", line, first.stderr)
-		}
+	if want := "build image " + built.Image + "\n"; !strings.HasPrefix(first.stderr, want) ||
+		!strings.Contains(first.stderr, "build image "+built.Image+": done (") {
+		t.Errorf("stderr lacks the build step:\n%s", first.stderr)
 	}
-	if strings.Contains(first.stdout, "stub build step") {
-		t.Error("progress leaked into stdout")
+	// A successful step's output is retained, then discarded.
+	if strings.Contains(first.stderr+first.stdout, "stub build step") {
+		t.Errorf("successful build output reached the output:\n%s", first.stderr)
 	}
 
 	// Without --output, the format is the preference, YAML by default.
@@ -169,7 +169,7 @@ func TestEnvironmentBuildCommand(t *testing.T) {
 	if second.err != nil || yaml.Unmarshal([]byte(second.stdout), &reused) != nil {
 		t.Fatalf("second build = %q, %v", second.stdout, second.err)
 	}
-	if !reused.Reused || reused.Identity != built.Identity || engine.builds != 1 || !strings.Contains(second.stderr, "is up to date") {
+	if !reused.Reused || reused.Identity != built.Identity || engine.builds != 1 || !strings.Contains(second.stderr, ": reused (") {
 		t.Fatalf("second build = %+v (builds %d), stderr %q", reused, engine.builds, second.stderr)
 	}
 }
@@ -190,7 +190,8 @@ func TestEnvironmentBuildPullFlag(t *testing.T) {
 	if pulled.err != nil || json.Unmarshal([]byte(pulled.stdout), &built) != nil {
 		t.Fatalf("with --pull = %q, %v", pulled.stdout, pulled.err)
 	}
-	if !built.Base.Pulled || engine.pulls != 1 || engine.builds != 1 || !strings.Contains(pulled.stderr, "0123456789ab: done") {
+	if !built.Base.Pulled || engine.pulls != 1 || engine.builds != 1 ||
+		!strings.Contains(pulled.stderr, `"subject":{"kind":"layer","name":"0123456789ab"}`) {
 		t.Fatalf("with --pull = %+v (pulls %d, builds %d), stderr %q", built, engine.pulls, engine.builds, pulled.stderr)
 	}
 }
