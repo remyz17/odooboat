@@ -5,8 +5,8 @@ build image odooboat/environment:abc: reused (0.4s)
 pull image postgres:16
 pull image postgres:16: done (2.5s)
 build image odooboat/environment:def
-  [3/5] RUN pip install | Collecting nope
-  [3/5] RUN pip install | ERROR: no matching distribution
+  [3/5] | Collecting nope
+  [3/5] | ERROR: no matching distribution
 build build-step [3/5] RUN pip install: failed (2.0s)
 build image odooboat/environment:def: failed (2.0s)
 create container ob-shop-dev-odoo-1a2b3c4d (odoo)

@@ -194,3 +194,20 @@ func TestJSONIgnoresTicksAndWarnings(t *testing.T) {
 		t.Fatalf("output = %q", b.String())
 	}
 }
+
+func TestPlainOutputPrefixIsShort(t *testing.T) {
+	for name, want := range map[string]string{
+		"[builder 4/4] RUN set -eux; venv=/opt/odooboat/venv/bin/python; pip() { uv tool run }": "[builder 4/4]",
+		"ob-shop-dev-odoo-1a2b3c4d": "ob-shop-dev-odoo-1a2b3c4d",
+		"exporting to image with a name long enough to need cutting short": "exporting to image with a name long e...",
+	} {
+		var b bytes.Buffer
+		feed(NewPlain(&b),
+			timed{0, app.StepStarted{ID: "1", Kind: app.StepBuild, Subject: app.Subject{Kind: app.ResourceBuildStep, Name: name}}},
+			timed{0, app.StepOutput{ID: "1", Data: []byte("x\n")}},
+		)
+		if got, wantLine := b.String(), "  "+want+" | x\n"; got != wantLine {
+			t.Errorf("%q: output %q, want %q", name, got, wantLine)
+		}
+	}
+}
