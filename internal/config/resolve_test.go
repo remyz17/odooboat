@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -184,5 +185,23 @@ func TestResolveRelativePathsUseAuthoringDocument(t *testing.T) {
 				t.Errorf("resolveRelative(%q, %q) = %q, want %q", base, tc.path, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestResolvePreferencesReadsOnlyUserConfig(t *testing.T) {
+	dir := t.TempDir()
+	user := filepath.Join(dir, "user.yaml")
+	if err := os.WriteFile(user, []byte("schema: 1\npreferences:\n  output: json\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ProjectFileName), []byte("not: [valid"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prefs, err := ResolvePreferences(Options{WorkingDir: dir, UserConfigPath: user})
+	if err != nil || prefs.Output != OutputJSON {
+		t.Fatalf("prefs = %+v, %v", prefs, err)
+	}
+	if prefs, err := ResolvePreferences(Options{WorkingDir: dir, UserConfigPath: filepath.Join(dir, "missing.yaml")}); err == nil {
+		t.Fatalf("missing explicit user config: prefs = %+v, want an error", prefs)
 	}
 }

@@ -30,9 +30,17 @@ type signalRouter struct {
 }
 
 // WatchSignals starts routing process signals. The returned context is
-// cancelled by the first signal received while nothing captures them; stop
-// releases the signals and cancels the context.
+// cancelled by the first signal received while nothing captures them; a
+// second one exits the process with 130 without waiting for the command to
+// finish (ADR 0011 §6). stop releases the signals and cancels the context.
 func WatchSignals(parent context.Context) (context.Context, Interrupts, func()) {
+	return watchSignals(parent, os.Exit)
+}
+
+// ExitInterrupted is the status of a process stopped by a second interrupt.
+const ExitInterrupted = 130
+
+func watchSignals(parent context.Context, exit func(int)) (context.Context, Interrupts, func()) {
 	ctx, cancel := context.WithCancel(parent)
 	incoming := make(chan os.Signal, 4)
 	sigs := make([]os.Signal, 0, len(routedSignals))
@@ -50,6 +58,10 @@ func WatchSignals(parent context.Context) (context.Context, Interrupts, func()) 
 				captured := r.captured
 				r.mu.Unlock()
 				if captured == nil {
+					if ctx.Err() != nil {
+						exit(ExitInterrupted)
+						continue
+					}
 					cancel()
 					continue
 				}

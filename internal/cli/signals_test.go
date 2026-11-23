@@ -54,3 +54,43 @@ func TestWatchSignalsCaptured(t *testing.T) {
 		t.Fatal("SIGTERM after release did not cancel the context")
 	}
 }
+
+func TestSecondInterruptExits(t *testing.T) {
+	exited := make(chan int, 1)
+	ctx, interrupts, stop := watchSignals(context.Background(), func(code int) { exited <- code })
+	defer stop()
+
+	signals, release := interrupts.Capture()
+	// Pending signals of one kind merge, so each is raised after the last
+	// one arrived.
+	for range 2 {
+		raise(t, syscall.SIGHUP)
+		select {
+		case <-signals:
+		case <-time.After(2 * time.Second):
+			t.Fatal("captured SIGHUP was not delivered")
+		}
+	}
+	select {
+	case code := <-exited:
+		t.Fatalf("exited %d while signals were captured", code)
+	case <-time.After(100 * time.Millisecond):
+	}
+	release()
+
+	raise(t, syscall.SIGHUP)
+	select {
+	case <-ctx.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("an uncaptured SIGHUP did not cancel the context")
+	}
+	raise(t, syscall.SIGHUP)
+	select {
+	case code := <-exited:
+		if code != 130 {
+			t.Fatalf("exit code %d, want 130", code)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("a second uncaptured signal did not exit")
+	}
+}

@@ -13,6 +13,8 @@ type Terminal interface {
 	MakeRaw() (restore func() error, err error)
 	// Resizes delivers the terminal's new size after each change, until stop.
 	Resizes() (sizes <-chan app.TerminalSize, stop func())
+	// StderrIsTerminal reports whether stderr is a terminal (ADR 0011 §3).
+	StderrIsTerminal() bool
 }
 
 // noTerminal is used when no terminal is available, as in tests.
@@ -22,3 +24,4 @@ func (noTerminal) Interactive() bool                          { return false }
 func (noTerminal) Size() (app.TerminalSize, error)            { return app.TerminalSize{}, nil }
 func (noTerminal) MakeRaw() (func() error, error)             { return func() error { return nil }, nil }
 func (noTerminal) Resizes() (<-chan app.TerminalSize, func()) { return nil, func() {} }
+func (noTerminal) StderrIsTerminal() bool                     { return false }

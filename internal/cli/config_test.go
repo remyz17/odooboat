@@ -47,7 +47,10 @@ func executeWith(t *testing.T, runtimes runtime.Connector, workingDir string, ar
 		WorkingDir: workingDir,
 	})
 	root.SetArgs(args)
-	err := root.ExecuteContext(context.Background())
+	cmd, err := root.ExecuteContextC(context.Background())
+	if p := presenterOf(cmd); p != nil {
+		p.Close()
+	}
 	return run{stdout: stdout.String(), stderr: stderr.String(), err: err}
 }
 

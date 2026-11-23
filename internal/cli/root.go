@@ -5,8 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"time"
 
 	"github.com/remyz17/odooboat/internal/app"
+	"github.com/remyz17/odooboat/internal/cli/ui"
 	"github.com/remyz17/odooboat/internal/config"
 	"github.com/spf13/cobra"
 )
@@ -87,6 +90,24 @@ type Dependencies struct {
 	Interrupts Interrupts
 	// Access serves logs, exec, shell, and psql; nil means Workspace.
 	Access AccessService
+	// Getenv reads process controls such as TERM and CI; nil means os.Getenv.
+	Getenv func(string) string
+	// Now stamps progress events; nil means time.Now.
+	Now func() time.Time
+}
+
+func (d Dependencies) getenv() func(string) string {
+	if d.Getenv == nil {
+		return os.Getenv
+	}
+	return d.Getenv
+}
+
+func (d Dependencies) now() func() time.Time {
+	if d.Now == nil {
+		return time.Now
+	}
+	return d.Now
 }
 
 // AccessService is the part of the workspace service that observes and
@@ -117,6 +138,25 @@ type globalFlags struct {
 	userConfigPath string
 	environment    string
 	output         string
+	progress       string
+	stepOutput     string
+	// present is the invocation's presenter, set before any command runs.
+	present *presenter
+}
+
+// reporter is where operations report their events; nil discards them.
+func (g *globalFlags) reporter() app.Reporter {
+	if g.present == nil {
+		return nil
+	}
+	return g.present.Reporter()
+}
+
+// warn echoes result warnings through the presenter.
+func (g *globalFlags) warn(messages []string) {
+	if g.present != nil {
+		g.present.Warn(messages)
+	}
 }
 
 func (g *globalFlags) selector(cmd *cobra.Command, deps Dependencies) app.Selector {
@@ -150,12 +190,26 @@ func NewRootCommand(deps Dependencies) *cobra.Command {
 	root.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
 		return &UsageError{Cmd: cmd, Err: fmt.Errorf("%w: %w", ErrUsage, err)}
 	})
+	// Every command reports through one presenter, chosen before it runs
+	// (ADR 0011 §7).
+	root.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
+		s := presentation{progress: global.progress, stepOutput: global.stepOutput, output: global.output, userConfig: global.userConfigPath}
+		if err := s.validate(cmd); err != nil {
+			return err
+		}
+		global.present = s.presenter(deps)
+		cmd.SetContext(withPresenter(cmd.Context(), global.present))
+		return nil
+	}
 
 	flags := root.PersistentFlags()
 	flags.StringVar(&global.projectPath, "project", "", "path to the "+config.ProjectFileName+" project definition file")
 	flags.StringVar(&global.userConfigPath, "user-config", "", "path to the user configuration file")
 	flags.StringVar(&global.environment, "env", "", "environment to resolve (default \""+config.DefaultEnvironment+"\")")
 	flags.StringVarP(&global.output, "output", "o", "", "output format: yaml or json")
+	flags.StringVar(&global.progress, "progress", string(ui.FormatAuto), "progress on stderr: auto, plain, or json")
+	flags.StringVar(&global.stepOutput, "step-output", string(ui.RetainOnFailure),
+		"output of finished steps: on-failure or all (on-failure shows the last 50 lines of a failed or interrupted step; output held by a process killed with SIGKILL is lost)")
 
 	root.AddCommand(newConfigCommand(deps, global))
 	root.AddCommand(newInitCommand(deps, global))
@@ -173,58 +227,31 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 func runRoot(ctx context.Context, root *cobra.Command, args []string, deps Dependencies) int {
 	root.SetArgs(args)
 	cmd, err := root.ExecuteContextC(ctx)
-	if err == nil {
-		return ExitOK
-	}
+	present := presenterOf(cmd)
 	var status *ExitStatus
-	if errors.As(err, &status) {
+	if err == nil || errors.As(err, &status) {
+		if present != nil {
+			present.Close()
+		}
+		if err == nil {
+			return ExitOK
+		}
 		return status.Code
 	}
+	if present == nil {
+		// The failure came before the command ran, often while parsing flags.
+		present = scanPresentation(args).presenter(deps)
+	}
 	var usage *UsageError
+	usageText := ""
 	if errors.As(err, &usage) && usage.Cmd != nil {
-		fmt.Fprint(deps.Stderr, usage.Cmd.UsageString())
+		usageText = usage.Cmd.UsageString()
 	}
-	fmt.Fprintln(deps.Stderr, "odooboat:", err)
-	if hint := app.Hint(err); hint != "" {
-		fmt.Fprintln(deps.Stderr, "hint:", hint)
-	}
+	present.Fail(err, usageText)
 	if cmd != nil && cmd.Annotations[annotationExecFamily] != "" {
 		return ExitToolFailure
 	}
 	return ExitCode(err)
-}
-
-func ExitCode(err error) int {
-	switch {
-	case err == nil:
-		return ExitOK
-	case errors.Is(err, ErrUsage):
-		return ExitUsage
-	case errors.Is(err, config.ErrNotFound),
-		errors.Is(err, config.ErrDecode),
-		errors.Is(err, config.ErrAuthored),
-		errors.Is(err, config.ErrResolved),
-		errors.Is(err, app.ErrSourceRequired):
-		return ExitConfig
-	case errors.Is(err, app.ErrState):
-		return ExitState
-	case errors.Is(err, app.ErrRuntimeUnavailable), errors.Is(err, app.ErrRuntimeUnsupported):
-		return ExitRuntime
-	case errors.Is(err, app.ErrEnvironmentBusy):
-		return ExitBusy
-	case errors.Is(err, app.ErrImageNotFound), errors.Is(err, app.ErrInvalidImage), errors.Is(err, app.ErrImageBuild):
-		return ExitImage
-	case errors.Is(err, app.ErrSourceMismatch), errors.Is(err, app.ErrSourceFetch), errors.Is(err, app.ErrSourceInvalid):
-		return ExitSource
-	case errors.Is(err, app.ErrConflict), errors.Is(err, app.ErrIncompatibleData):
-		return ExitConflict
-	case errors.Is(err, app.ErrNotReady):
-		return ExitNotReady
-	case errors.Is(err, app.ErrNotRunning):
-		return ExitNotRunning
-	default:
-		return ExitError
-	}
 }
 
 func noSubcommand(cmd *cobra.Command, args []string) error {

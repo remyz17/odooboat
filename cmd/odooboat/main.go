@@ -23,7 +23,7 @@ func main() {
 
 	workingDir, err := os.Getwd()
 	if err != nil {
-		_, _ = os.Stderr.WriteString("odooboat: " + err.Error() + "\n")
+		_, _ = os.Stderr.WriteString("error: " + err.Error() + "\n")
 		os.Exit(cli.ExitError)
 	}
 	store := statefile.New()
@@ -31,6 +31,6 @@ func main() {
 	os.Exit(cli.Run(ctx, os.Args[1:], cli.Dependencies{
 		Config: app.NewConfigService(), Workspace: app.NewWorkspaceService(store, store, runtimes, cli.Version),
 		Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr, WorkingDir: workingDir,
-		Terminal: cli.NewTerminal(os.Stdin, os.Stdout), Interrupts: interrupts,
+		Terminal: cli.NewTerminal(os.Stdin, os.Stdout, os.Stderr), Interrupts: interrupts,
 	}))
 }
