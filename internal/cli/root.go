@@ -159,10 +159,12 @@ func (g *globalFlags) setRaw(raw bool) {
 	}
 }
 
-// warn echoes result warnings through the presenter.
+// warn echoes result warnings through the presenter, written before the
+// result that follows on stdout.
 func (g *globalFlags) warn(messages []string) {
 	if g.present != nil {
 		g.present.Warn(messages)
+		g.present.Flush()
 	}
 }
 

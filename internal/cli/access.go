@@ -65,12 +65,17 @@ func newSession(deps Dependencies, global *globalFlags, noTTY bool) (app.Session
 		return s, nil, fmt.Errorf("switch terminal to raw mode: %w", err)
 	}
 	global.setRaw(true)
+	release := func() {}
+	if deps.Interrupts != nil {
+		release = deps.Interrupts.Hold()
+	}
 	resizes, stopResizes := terminal.Resizes()
 	s.TTY, s.Size, s.Resizes = true, size, resizes
 	return s, func() {
 		stopResizes()
 		global.setRaw(false)
 		_ = restore()
+		release()
 	}, nil
 }
 

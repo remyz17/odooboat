@@ -17,6 +17,10 @@ type Interrupts interface {
 	// Capture delivers SIGINT, SIGTERM, SIGHUP, and SIGQUIT to the returned
 	// channel, without cancelling the context, until release is called.
 	Capture() (signals <-chan app.Signal, release func())
+	// Hold keeps signals cancelling the context but stops a second one from
+	// exiting the process, until release: a TTY session terminates its
+	// remote command after the first (ADR 0010 §7, ADR 0011 §10).
+	Hold() (release func())
 }
 
 var routedSignals = map[os.Signal]app.Signal{
@@ -27,6 +31,7 @@ var routedSignals = map[os.Signal]app.Signal{
 type signalRouter struct {
 	mu       sync.Mutex
 	captured chan app.Signal
+	held     int
 }
 
 // WatchSignals starts routing process signals. The returned context is
@@ -55,10 +60,10 @@ func watchSignals(parent context.Context, exit func(int)) (context.Context, Inte
 			select {
 			case s := <-incoming:
 				r.mu.Lock()
-				captured := r.captured
+				captured, held := r.captured, r.held > 0
 				r.mu.Unlock()
 				if captured == nil {
-					if ctx.Err() != nil {
+					if ctx.Err() != nil && !held {
 						exit(ExitInterrupted)
 						continue
 					}
@@ -92,5 +97,19 @@ func (r *signalRouter) Capture() (<-chan app.Signal, func()) {
 			r.captured = nil
 		}
 		r.mu.Unlock()
+	}
+}
+
+func (r *signalRouter) Hold() func() {
+	r.mu.Lock()
+	r.held++
+	r.mu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			r.mu.Lock()
+			r.held--
+			r.mu.Unlock()
+		})
 	}
 }

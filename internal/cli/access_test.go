@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"slices"
 	"strings"
 	"testing"
@@ -236,5 +237,27 @@ func TestRawSessionNoticeUsesCRLF(t *testing.T) {
 	}
 	if !strings.HasSuffix(r.stderr, "selection failed\n") || strings.HasSuffix(r.stderr, "\r\n") {
 		t.Fatalf("stderr %q: the error after the session must end with a plain newline", r.stderr)
+	}
+}
+
+// fakeInterrupts counts holds of the second-interrupt exit.
+type fakeInterrupts struct{ held, released int }
+
+func (f *fakeInterrupts) Capture() (<-chan app.Signal, func()) { return nil, func() {} }
+func (f *fakeInterrupts) Hold() func() {
+	f.held++
+	return func() { f.released++ }
+}
+
+func TestTTYSessionHoldsSecondInterruptExit(t *testing.T) {
+	for name, access := range map[string]*fakeAccess{"success": {}, "failure": {err: app.ErrNotRunning}} {
+		interrupts := &fakeInterrupts{}
+		var stderr bytes.Buffer
+		deps := Dependencies{Stdin: strings.NewReader(""), Stdout: io.Discard, Stderr: &stderr, WorkingDir: t.TempDir(),
+			Access: access, Terminal: &fakeTerminal{}, Interrupts: interrupts}
+		runRoot(context.Background(), NewRootCommand(deps), []string{"exec", "--", "sh"}, deps)
+		if interrupts.held != 1 || interrupts.released != 1 {
+			t.Errorf("%s: held %d, released %d; want 1 and 1", name, interrupts.held, interrupts.released)
+		}
 	}
 }

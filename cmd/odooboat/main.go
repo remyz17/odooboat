@@ -30,7 +30,7 @@ func main() {
 	runtimes := runtime.Connectors{config.RuntimeKindDocker: docker.Connector{}}
 	os.Exit(cli.Run(ctx, os.Args[1:], cli.Dependencies{
 		Config: app.NewConfigService(), Workspace: app.NewWorkspaceService(store, store, runtimes, cli.Version),
-		Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr, WorkingDir: workingDir,
+		Stdin: os.Stdin, Stdout: os.Stdout, Stderr: cli.ProgressStderr(os.Stderr), WorkingDir: workingDir,
 		Terminal: cli.NewTerminal(os.Stdin, os.Stdout, os.Stderr), Interrupts: interrupts,
 	}))
 }
