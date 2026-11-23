@@ -25,6 +25,11 @@ type imageEngine struct {
 	pulls    int
 	// builtIn overrides the engine reported by builds, to exercise delivery.
 	builtIn *runtime.EngineIdentity
+	// layers are reported, started then done, by each pull.
+	layers []string
+	// buildHook, when set, runs inside BuildImage with its progress; its
+	// error fails the build.
+	buildHook func(ctx context.Context, progress runtime.ProgressFunc) error
 }
 
 func newImageEngine() *imageEngine {
@@ -49,10 +54,17 @@ func (e *imageEngine) InspectImage(_ context.Context, ref string) (runtime.Image
 	return runtime.ImageInfo{}, fmt.Errorf("%w: %s", runtime.ErrImageNotFound, ref)
 }
 
-func (e *imageEngine) PullImage(_ context.Context, ref string, _ runtime.ProgressFunc) error {
+func (e *imageEngine) PullImage(_ context.Context, ref string, progress runtime.ProgressFunc) error {
 	info, ok := e.pullable[ref]
 	if !ok {
 		return errors.New("not in the registry")
+	}
+	for _, layer := range e.layers {
+		p := runtime.Progress{ID: layer, Kind: runtime.ProgressLayer, Name: layer}
+		for _, state := range []runtime.ProgressState{runtime.ProgressStarted, runtime.ProgressDone} {
+			p.State = state
+			progress.Report(p)
+		}
 	}
 	e.pulls++
 	e.add([]string{ref}, info)
@@ -68,9 +80,14 @@ func (e *imageEngine) TagImage(_ context.Context, source, target string) error {
 	return nil
 }
 
-func (e *imageEngine) BuildImage(_ context.Context, req runtime.BuildRequest) (runtime.BuiltImage, error) {
+func (e *imageEngine) BuildImage(ctx context.Context, req runtime.BuildRequest) (runtime.BuiltImage, error) {
 	if _, err := io.ReadAll(req.Context); err != nil {
 		return runtime.BuiltImage{}, err
+	}
+	if e.buildHook != nil {
+		if err := e.buildHook(ctx, req.Progress); err != nil {
+			return runtime.BuiltImage{}, err
+		}
 	}
 	e.builds++
 	info := runtime.ImageInfo{ID: fmt.Sprintf("sha256:built-%d", e.builds), Labels: req.Labels, Arch: "arm64"}
@@ -123,9 +140,173 @@ func communityLines(t *testing.T, base, community string) string {
 }
 
 func build(service WorkspaceService, selector Selector, pull bool) (EnvironmentBuildResult, error) {
-	return service.BuildEnvironment(context.Background(), EnvironmentBuildRequest{
-		Selector: selector, Wait: WaitOptions{Policy: WaitFailFast}, Pull: pull,
+	return buildReporting(context.Background(), service, selector, pull, nil)
+}
+
+func buildReporting(ctx context.Context, service WorkspaceService, selector Selector, pull bool, r Reporter) (EnvironmentBuildResult, error) {
+	return service.BuildEnvironment(ctx, EnvironmentBuildRequest{
+		Selector: selector, Wait: WaitOptions{Policy: WaitFailFast}, Pull: pull, Reporter: r,
 	})
+}
+
+// vertex reports one BuildKit-like step: started, one log, then state.
+func vertex(progress runtime.ProgressFunc, id string, state runtime.ProgressState) {
+	p := runtime.Progress{ID: id, Kind: runtime.ProgressVertex, Name: "RUN " + id}
+	for _, s := range []runtime.ProgressState{runtime.ProgressStarted, runtime.ProgressRunning} {
+		p.State = s
+		if s == runtime.ProgressRunning {
+			p.Output = []byte("working\n")
+		}
+		progress.Report(p)
+	}
+	if state != "" {
+		p.State, p.Output = state, nil
+		progress.Report(p)
+	}
+}
+
+func topLevel(events []Event) []StepStarted {
+	var out []StepStarted
+	for _, s := range started(events) {
+		if s.Parent == "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func childrenOf(events []Event, parent string) []StepStarted {
+	var out []StepStarted
+	for _, s := range started(events) {
+		if s.Parent == parent {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func pinnedFixture(t *testing.T) (*imageEngine, WorkspaceService, Selector) {
+	t.Helper()
+	engine := newImageEngine()
+	engine.pullable[pinnedBase] = runtime.ImageInfo{ID: "sha256:" + strings.Repeat("c", 64), Labels: baseLabels("3.12"), Arch: "arm64"}
+	service, selector, _ := buildFixture(t, engine, communityLines(t, pinnedBase, "community-18.0"))
+	return engine, service, selector
+}
+
+func TestBuildReportsBalancedSteps(t *testing.T) {
+	engine, service, selector := pinnedFixture(t)
+	engine.layers = []string{"a1b2c3d4e5f6", "0f0f0f0f0f0f"}
+	engine.buildHook = func(_ context.Context, progress runtime.ProgressFunc) error {
+		vertex(progress, "v1", runtime.ProgressDone)
+		return nil
+	}
+	var r recorder
+	if _, err := buildReporting(context.Background(), service, selector, true, &r); err != nil {
+		t.Fatal(err)
+	}
+	events := r.all()
+	assertBalanced(t, events)
+	top := topLevel(events)
+	if len(top) != 2 || top[0].Kind != StepPull || top[0].Subject != (Subject{Kind: ResourceImage, Name: pinnedBase}) ||
+		top[1].Kind != StepBuild || top[1].Subject.Kind != ResourceImage {
+		t.Fatalf("top-level steps = %+v", top)
+	}
+	if layers := childrenOf(events, top[0].ID); len(layers) != 2 || layers[0].Subject.Kind != ResourceLayer {
+		t.Fatalf("pull children = %+v", layers)
+	}
+	if vertices := childrenOf(events, top[1].ID); len(vertices) != 1 || vertices[0].Subject.Kind != ResourceBuildStep {
+		t.Fatalf("build children = %+v", vertices)
+	}
+	if f, _ := finished(events, top[1].ID); f.Outcome != OutcomeDone {
+		t.Fatalf("build finished %+v", f)
+	}
+}
+
+func TestBuildReusedImage(t *testing.T) {
+	_, service, selector := pinnedFixture(t)
+	if _, err := build(service, selector, true); err != nil {
+		t.Fatal(err)
+	}
+	var r recorder
+	if _, err := buildReporting(context.Background(), service, selector, false, &r); err != nil {
+		t.Fatal(err)
+	}
+	events := r.all()
+	assertBalanced(t, events)
+	steps := started(events)
+	if len(steps) != 1 || steps[0].Kind != StepBuild {
+		t.Fatalf("steps = %+v, want one build", steps)
+	}
+	if f, _ := finished(events, steps[0].ID); f.Outcome != OutcomeReused {
+		t.Fatalf("build finished %+v, want reused", f)
+	}
+}
+
+func TestBuildCancelledIsInterrupted(t *testing.T) {
+	engine, service, selector := pinnedFixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	engine.buildHook = func(ctx context.Context, progress runtime.ProgressFunc) error {
+		vertex(progress, "v1", "") // left open, as a running step
+		cancel()
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	var r recorder
+	if _, err := buildReporting(ctx, service, selector, true, &r); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v", err)
+	}
+	events := r.all()
+	assertBalanced(t, events)
+	build := topLevel(events)[1]
+	for _, id := range []string{build.ID, childrenOf(events, build.ID)[0].ID} {
+		if f, _ := finished(events, id); f.Outcome != OutcomeInterrupted {
+			t.Errorf("step %s finished %+v, want interrupted", id, f)
+		}
+	}
+}
+
+func TestBuildFailureFinishesFailed(t *testing.T) {
+	engine, service, selector := pinnedFixture(t)
+	engine.buildHook = func(_ context.Context, progress runtime.ProgressFunc) error {
+		vertex(progress, "v1", runtime.ProgressFailed)
+		return fmt.Errorf("%w: exit code: 1", runtime.ErrImageBuild)
+	}
+	var r recorder
+	if _, err := buildReporting(context.Background(), service, selector, true, &r); !errors.Is(err, ErrImageBuild) {
+		t.Fatalf("err = %v", err)
+	}
+	events := r.all()
+	assertBalanced(t, events)
+	build := topLevel(events)[1]
+	f, _ := finished(events, build.ID)
+	if f.Outcome != OutcomeFailed || !errors.Is(f.Err, ErrImageBuild) {
+		t.Fatalf("build finished %+v", f)
+	}
+}
+
+func TestRuntimeProgressIDsAreScopedToParent(t *testing.T) {
+	var r recorder
+	tr := newTracker(&r)
+	layer := runtime.Progress{ID: "a1b2c3d4e5f6", Kind: runtime.ProgressLayer, Name: "a1b2c3d4e5f6"}
+	for _, image := range []string{"base", "postgres"} {
+		pull := tr.start("", StepPull, Subject{Kind: ResourceImage, Name: image})
+		progress := tr.runtimeProgress(context.Background(), pull.id())
+		progress(withState(layer, runtime.ProgressStarted, 0, 0))
+		progress(withState(layer, runtime.ProgressDone, 0, 0))
+		pull.finish(context.Background(), nil)
+	}
+	events := r.all()
+	assertBalanced(t, events)
+	layers := 0
+	for _, s := range started(events) {
+		if s.Subject.Kind == ResourceLayer {
+			layers++
+		}
+	}
+	if layers != 2 {
+		t.Fatalf("layer steps = %d, want one per pull", layers)
+	}
 }
 
 func TestBuildEnvironmentBuildsThenReuses(t *testing.T) {

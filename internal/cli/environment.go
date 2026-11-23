@@ -95,7 +95,7 @@ func newEnvironmentBuildCommand(deps Dependencies, global *globalFlags) *cobra.C
 			result, err := deps.Workspace.BuildEnvironment(cmd.Context(), app.EnvironmentBuildRequest{
 				Selector: global.selector(cmd, deps),
 				Wait:     global.waitOptions(),
-				Pull:     pull, Progress: deps.Stderr,
+				Pull:     pull, Reporter: global.reporter(),
 			})
 			if err != nil {
 				return err

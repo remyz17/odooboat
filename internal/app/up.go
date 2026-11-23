@@ -210,7 +210,8 @@ func (s WorkspaceService) up(ctx context.Context, env LockedEnvironment, pull bo
 	if result.Postgres, err = preparePostgres(ctx, env, stores.images, in.postgresRef, cfg.Postgres, pull, progress); err != nil {
 		return result, err
 	}
-	built, err := buildEnvironment(ctx, env, pull, progress)
+	// Until up reports typed steps, its build reports none.
+	built, err := buildEnvironment(ctx, env, pull, newTracker(nil))
 	if err != nil {
 		return result, err
 	}
