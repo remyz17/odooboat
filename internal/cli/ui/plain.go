@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/remyz17/odooboat/internal/app"
@@ -131,8 +132,26 @@ func (p *plain) step(id string) *plainStep {
 }
 
 func (p *plain) writeLine(s *plainStep) {
-	fmt.Fprintf(p.w, "  %s | %s\n", s.started.Subject.Name, s.partial)
+	fmt.Fprintf(p.w, "  %s | %s\n", outputPrefix(s.started.Subject.Name), s.partial)
 	s.partial = s.partial[:0]
+}
+
+// prefixLength bounds the subject shown before each output line.
+const prefixLength = 40
+
+// outputPrefix shortens a subject for output lines: a build step's name is
+// its whole command, so only its "[stage n/m]" marker is kept; other long
+// names are cut.
+func outputPrefix(name string) string {
+	if strings.HasPrefix(name, "[") {
+		if end := strings.Index(name, "]"); end > 0 {
+			return name[:end+1]
+		}
+	}
+	if runes := []rune(name); len(runes) > prefixLength {
+		return string(runes[:prefixLength-3]) + "..."
+	}
+	return name
 }
 
 // endLine writes an unterminated output line before the step's finish.
