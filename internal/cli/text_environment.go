@@ -44,7 +44,7 @@ func (b buildText) RenderText(p *ui.Printer) error {
 	}
 	p.Headline(b.Environment, state, ui.ToneDone)
 	rows := [][]string{
-		{"image", b.Image},
+		{"image", p.Ref(b.Image)},
 		{"id", p.ID(b.ImageID)},
 		{"base", pulled, p.Ref(b.Base.Reference)},
 		{"odoo", fmt.Sprintf("%s, python %s, postgres client %d", b.Series, b.Python, b.PostgresClient)},

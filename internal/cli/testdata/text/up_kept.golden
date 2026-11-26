@@ -1,6 +1,6 @@
 dev  ● running
   url              http://127.0.0.1:54321
-  odoo image       reused    odooboat/environment:7c1e5f0a9b3d
+  odoo image       reused    odooboat/environment:247d32734a9d
   postgres image   present   docker.io/library/postgres:16-bookworm@sha256:0123456789ab
   odoo             kept      ob-myproject-dev-odoo-1a2b3c4d
   postgres         kept      ob-myproject-dev-postgres-1a2b3c4d

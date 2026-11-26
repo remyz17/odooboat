@@ -132,6 +132,8 @@ func TestPrinterIdentifiers(t *testing.T) {
 		{p.ID("abc"), "abc"},
 		{p.Ref("postgres:16@" + digest), "postgres:16@sha256:0123456789ab"},
 		{p.Ref("odooboat/environment:1a2b"), "odooboat/environment:1a2b"},
+		{p.Ref("odooboat/environment:247d32734a9d17c8553bccc0c92c1fdcd51c0ab4c07a8013a1aee81097837b5e"), "odooboat/environment:247d32734a9d"},
+		{p.Ref("registry:5000/odooboat/environment:247d32734a9d17c8553bccc0c92c1fdcd51c0ab4c07a8013a1aee81097837b5e"), "registry:5000/odooboat/environment:247d32734a9d"},
 	} {
 		if c.got != c.want {
 			t.Errorf("got %q, want %q", c.got, c.want)

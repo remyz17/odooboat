@@ -143,11 +143,16 @@ func (p *Printer) ID(id string) string {
 	return id
 }
 
-var digest = regexp.MustCompile(`@sha256:([0-9a-f]{12})[0-9a-f]*`)
+var (
+	digest = regexp.MustCompile(`@sha256:([0-9a-f]{12})[0-9a-f]*`)
+	// hashTag is a tag that is a full sha256, as identity tags are.
+	hashTag = regexp.MustCompile(`:([0-9a-f]{12})[0-9a-f]{52}$`)
+)
 
-// Ref shortens the digest of an image reference to 12 characters.
+// Ref shortens the digest of an image reference, and a tag that is a full
+// hash, to 12 characters.
 func (p *Printer) Ref(ref string) string {
-	return digest.ReplaceAllString(ref, "@sha256:$1")
+	return hashTag.ReplaceAllString(digest.ReplaceAllString(ref, "@sha256:$1"), ":$1")
 }
 
 // Path shows paths under the home directory with ~.
