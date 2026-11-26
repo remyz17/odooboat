@@ -23,7 +23,7 @@ func newEnvironmentShowCommand(deps Dependencies, global *globalFlags) *cobra.Co
 			if err != nil {
 				return err
 			}
-			if err := global.print(deps, result, nil, nil); err != nil {
+			if err := global.print(deps, result, environmentShowText(result), nil); err != nil {
 				return err
 			}
 			if result.WorkspaceStatus == app.WorkspaceStatusDuplicate {

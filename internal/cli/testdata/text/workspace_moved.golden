@@ -1,0 +1,6 @@
+workspace  ⚠ moved
+  id         0f1e2d3c-4b5
+  root       ~/shop
+  project    ~/shop/odooboat.yaml
+  state      ~/shop/.odooboat/state.json
+  previous   /srv/old/shop

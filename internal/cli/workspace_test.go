@@ -43,7 +43,7 @@ func TestWorkspaceAndEnvironmentCommands(t *testing.T) {
 		t.Fatalf("workspace show changed filesystem: %v", err)
 	}
 
-	environmentShow := execute(t, root, append(append([]string{}, base...), "environment", "show")...)
+	environmentShow := execute(t, root, append(append([]string{}, base...), "environment", "show", "-o", "yaml")...)
 	if environmentShow.err != nil || !strings.Contains(environmentShow.stdout, "bound: false") {
 		t.Fatalf("environment show = %q, %v", environmentShow.stdout, environmentShow.err)
 	}

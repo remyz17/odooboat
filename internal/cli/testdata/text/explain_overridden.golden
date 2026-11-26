@@ -1,0 +1,4 @@
+odooVersion  18.0
+  from        invocation (odooVersion)
+  overrides   environment ~/shop/odooboat.yaml:12:18 (environments.dev.odooVersion)
+              project ~/shop/odooboat.yaml:4:16 (project.odooVersion)
