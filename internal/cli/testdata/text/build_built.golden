@@ -1,0 +1,9 @@
+dev  ✓ image built
+  image        odooboat/environment:7c1e5f0a9b3d
+  id           0123456789ab
+  base         pulled   ghcr.io/remyz17/odooboat-base:18.0-py3.12@sha256:fedcba987654
+  odoo         18.0, python 3.13, postgres client 16
+  sources      embedded
+  community    https://github.com/odoo/odoo.git@0123456789ab
+  enterprise   ~/src/enterprise
+  ⚠ python 3.13 is outside the support matrix of 18.0

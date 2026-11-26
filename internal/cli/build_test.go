@@ -163,8 +163,8 @@ func TestEnvironmentBuildCommand(t *testing.T) {
 		t.Errorf("successful build output reached the output:\n%s", first.stderr)
 	}
 
-	// Without --output, the format is the preference, YAML by default.
-	second := executeWith(t, imageStubConnector{engine}, root, append(append([]string{}, base...), "environment", "build")...)
+	// The same result in YAML.
+	second := executeWith(t, imageStubConnector{engine}, root, append(append([]string{}, base...), "environment", "build", "-o", "yaml")...)
 	var reused buildOutput
 	if second.err != nil || yaml.Unmarshal([]byte(second.stdout), &reused) != nil {
 		t.Fatalf("second build = %q, %v", second.stdout, second.err)

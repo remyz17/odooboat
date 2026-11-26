@@ -1,0 +1,8 @@
+dev  ✓ image reused
+  image        odooboat/environment:7c1e5f0a9b3d
+  id           0123456789ab
+  base         present   ghcr.io/remyz17/odooboat-base:18.0-py3.12@sha256:fedcba987654
+  odoo         18.0, python 3.12, postgres client 16
+  sources      mount
+  community    ~/src/odoo
+  enterprise   ~/src/enterprise
