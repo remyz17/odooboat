@@ -11,6 +11,7 @@ import (
 
 	"github.com/remyz17/odooboat/internal/app"
 	"github.com/remyz17/odooboat/internal/cli/ui"
+	"github.com/remyz17/odooboat/internal/config"
 	"github.com/remyz17/odooboat/internal/runtime"
 )
 
@@ -187,5 +188,41 @@ func TestDownText(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			goldenText(t, name, renderText(t, downText(result), unicodeCaps))
 		})
+	}
+}
+
+func buildResult() app.EnvironmentBuildResult {
+	return app.EnvironmentBuildResult{
+		Environment: "dev", Image: envImage, ImageID: "sha256:0123456789abcdef0123456789abcdef", Reused: true,
+		Base:   app.BuildBase{Reference: "ghcr.io/remyz17/odooboat-base:18.0-py3.12@sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"},
+		Series: "18.0", Python: "3.12", PostgresClient: 16, Unsupported: []config.Dimension{}, SourceMode: "mount",
+		Community:  app.BuildSource{Path: testHome + "/src/odoo", Series: "18.0"},
+		Enterprise: &app.BuildSource{Path: testHome + "/src/enterprise", Series: "18.0"},
+	}
+}
+
+func TestBuildText(t *testing.T) {
+	built := buildResult()
+	built.Reused, built.Base.Pulled, built.SourceMode = false, true, "embedded"
+	built.Python, built.Unsupported = "3.13", []config.Dimension{config.DimensionPython}
+	built.Community = app.BuildSource{Git: "https://github.com/odoo/odoo.git", Commit: "0123456789abcdef0123456789abcdef01234567", Series: "18.0"}
+	for name, result := range map[string]app.EnvironmentBuildResult{"build_reused": buildResult(), "build_built": built} {
+		t.Run(name, func(t *testing.T) {
+			goldenText(t, name, renderText(t, buildText(result), unicodeCaps))
+		})
+	}
+}
+
+func TestTextIsASCIIWithoutUnicode(t *testing.T) {
+	for name, view := range map[string]textRenderer{
+		"status": statusText(runningStatus()), "up": upText(upResult(app.ActionCreated, false, true, []string{"w"})),
+		"build": buildText(buildResult()),
+	} {
+		for _, r := range renderText(t, view, ui.Capabilities{}) {
+			if r > 127 {
+				t.Errorf("%s: non-ASCII %q without Unicode", name, r)
+				break
+			}
+		}
 	}
 }

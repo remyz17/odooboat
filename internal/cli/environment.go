@@ -88,7 +88,7 @@ func newEnvironmentBuildCommand(deps Dependencies, global *globalFlags) *cobra.C
 			if err != nil {
 				return err
 			}
-			return global.print(deps, result, nil, nil)
+			return global.print(deps, result, buildText(result), nil)
 		},
 	}
 	cmd.Flags().BoolVar(&pull, "pull", false, "pull the base image, pinned by digest, if it is missing")
