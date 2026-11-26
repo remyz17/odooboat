@@ -1,0 +1,6 @@
+dev  ⚠ partial
+  odoo       running      ob-myproject-dev-odoo-1a2b3c4d
+  postgres   exited (1)   ob-myproject-dev-postgres-1a2b3c4d
+  volumes    ob-myproject-dev-postgres-data-1a2b3c4d, ob-myproject-dev-odoo-data-1a2b3c4d
+  orphan     container    ob-myproject-old-odoo-9f8e7d6c
+  ⚠ no masterPassword is configured: Odoo's database manager uses its default master password
