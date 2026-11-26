@@ -22,7 +22,7 @@ func newWorkspaceShowCommand(deps Dependencies, global *globalFlags) *cobra.Comm
 			if err != nil {
 				return err
 			}
-			if err := global.print(deps, result, nil, nil); err != nil {
+			if err := global.print(deps, result, workspaceShowText(result), nil); err != nil {
 				return err
 			}
 			if result.Status == app.WorkspaceStatusDuplicate {

@@ -13,6 +13,8 @@ import (
 	"github.com/remyz17/odooboat/internal/cli/ui"
 	"github.com/remyz17/odooboat/internal/config"
 	"github.com/remyz17/odooboat/internal/runtime"
+	"github.com/remyz17/odooboat/internal/workspace"
+	"gopkg.in/yaml.v3"
 )
 
 var update = flag.Bool("update", false, "rewrite the golden files")
@@ -223,6 +225,79 @@ func TestTextIsASCIIWithoutUnicode(t *testing.T) {
 				t.Errorf("%s: non-ASCII %q without Unicode", name, r)
 				break
 			}
+		}
+	}
+}
+
+func TestInspectText(t *testing.T) {
+	explain := app.ExplainResult{Field: "odooVersion", Value: "18.0",
+		Winner: config.SourceRef{Kind: config.SourceInvocation, Field: "odooVersion"},
+		Overridden: []config.SourceRef{
+			{Kind: config.SourceEnvironment, Path: testHome + "/shop/odooboat.yaml", Line: 12, Column: 18, Field: "environments.dev.odooVersion"},
+			{Kind: config.SourceProject, Path: testHome + "/shop/odooboat.yaml", Line: 4, Column: 16, Field: "project.odooVersion"},
+		},
+	}
+	current := app.WorkspaceShowResult{Status: app.WorkspaceStatusCurrent, WorkspaceID: "0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b",
+		WorkspaceRoot: testHome + "/shop", ProjectFile: testHome + "/shop/odooboat.yaml", StateFile: testHome + "/shop/.odooboat/state.json"}
+	moved := current
+	moved.Status, moved.PreviousRoot = app.WorkspaceStatusMoved, "/srv/old/shop"
+	matches := true
+	differs := false
+	desired := workspace.Connection{Alias: "local", Kind: "docker", Context: "desktop-linux"}
+	bound := app.EnvironmentShowResult{
+		WorkspaceID: current.WorkspaceID, WorkspaceStatus: app.WorkspaceStatusCurrent, EnvironmentID: "1a2b3c4d", Environment: "dev",
+		Bound: true, DesiredConnection: desired, BoundConnection: &desired, Matches: &matches,
+		Engine: &workspace.EngineRecord{Source: "docker-info", Value: "sha256:0123456789abcdef0123"},
+		Runtime: app.RuntimeReport{Series: "18.0", Python: "3.12", Postgres: 16, Unsupported: []config.Dimension{config.DimensionPostgres},
+			Source: app.SourceReport{Declared: true, Mode: "mount",
+				Community:  &app.SourceInspection{Path: testHome + "/src/odoo", DetectedSeries: "18.0", Matches: &matches},
+				Enterprise: &app.SourceInspection{Path: testHome + "/src/enterprise", DetectedSeries: "17.0", Matches: &differs}}},
+	}
+	notBound := app.EnvironmentShowResult{WorkspaceStatus: app.WorkspaceStatusUninitialized, Environment: "dev", DesiredConnection: desired,
+		Runtime: app.RuntimeReport{Series: "18.0", Python: "3.12", Postgres: 16, Unsupported: []config.Dimension{},
+			Source: app.SourceReport{Declared: true, Mode: "embedded",
+				Community: &app.SourceInspection{Git: "https://github.com/odoo/odoo.git", Commit: "0123456789abcdef0123456789abcdef01234567",
+					Note: "embedded sources are inspected when the environment image is built"}}}}
+	for name, view := range map[string]textRenderer{
+		"explain_overridden": explainText(explain), "workspace_current": workspaceShowText(current), "workspace_moved": workspaceShowText(moved),
+		"environment_bound": environmentShowText(bound), "environment_not_bound": environmentShowText(notBound),
+	} {
+		t.Run(name, func(t *testing.T) { goldenText(t, name, renderText(t, view, unicodeCaps)) })
+	}
+}
+
+func TestExplainTextHidesSecret(t *testing.T) {
+	root, base := cliStateProject(t)
+	project := "schema: 1\nproject:\n  name: demo\n  odooVersion: \"18.0\"\n  runtimeConnection: local\n  odoo:\n    masterPassword:\n      literal: s3cret\n"
+	if err := os.WriteFile(filepath.Join(root, "odooboat.yaml"), []byte(project), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	text := execute(t, root, append(base, "config", "explain", "odoo.masterPassword", "-o", "text")...)
+	asYAML := execute(t, root, append(base, "config", "explain", "odoo.masterPassword", "-o", "yaml")...)
+	var explained struct {
+		Value string `yaml:"value"`
+	}
+	if text.err != nil || asYAML.err != nil || yaml.Unmarshal([]byte(asYAML.stdout), &explained) != nil {
+		t.Fatalf("explain: %v, %v, %q", text.err, asYAML.err, asYAML.stdout)
+	}
+	if strings.Contains(text.stdout, "s3cret") || !strings.HasPrefix(text.stdout, "odoo.masterPassword  "+explained.Value+"\n") {
+		t.Fatalf("text = %q, want the value %q and never the secret", text.stdout, explained.Value)
+	}
+}
+
+func TestDuplicateWorkspacePrintsTextThenFails(t *testing.T) {
+	root, base := cliStateProject(t)
+	if bind := execute(t, root, append(base, "environment", "bind")...); bind.err != nil {
+		t.Fatal(bind.err)
+	}
+	copyRoot := filepath.Join(t.TempDir(), "copy")
+	copyTreeCLI(t, root, copyRoot)
+	copyArgs := []string{"--user-config", filepath.Join(copyRoot, "user.yaml"), "-o", "text"}
+	for command, headline := range map[string]string{"workspace": "workspace  ! duplicate", "environment": "default  "} {
+		result := execute(t, copyRoot, append(copyArgs, command, "show")...)
+		first, _, _ := strings.Cut(result.stdout, "\n")
+		if ExitCode(result.err) != ExitState || !strings.HasPrefix(first, headline) || !strings.Contains(result.stdout, "duplicate") {
+			t.Errorf("%s show: exit %d, stdout %q", command, ExitCode(result.err), result.stdout)
 		}
 	}
 }

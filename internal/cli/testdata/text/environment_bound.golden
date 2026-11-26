@@ -1,0 +1,10 @@
+dev  ✓ bound
+  workspace    current        0f1e2d3c-4b5
+  runtime      local (docker, desktop-linux)
+  bound        matches        local (docker, desktop-linux)
+  engine       0123456789ab   docker-info
+  odoo         18.0, python 3.12, postgres 16
+  sources      mount
+  community    ~/src/odoo (series 18.0)
+  enterprise   ~/src/enterprise (series 17.0, differs)
+  ⚠ postgres 16 is outside the support matrix of 18.0

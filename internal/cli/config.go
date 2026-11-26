@@ -139,7 +139,7 @@ func newConfigExplainCommand(deps Dependencies, global *globalFlags) *cobra.Comm
 			if err != nil {
 				return err
 			}
-			return global.print(deps, result, nil, nil)
+			return global.print(deps, result, explainText(result), nil)
 		},
 	}
 	addOverrideFlags(cmd)
