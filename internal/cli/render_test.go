@@ -126,3 +126,24 @@ func TestWorkspaceShowFollowsOutputPreference(t *testing.T) {
 		t.Fatalf("workspace show = %q, %v; want JSON", show.stdout, show.err)
 	}
 }
+
+// With 2>&1, progress reported before the result is written before it, in
+// text as in yaml.
+func TestTextResultFollowsProgress(t *testing.T) {
+	var both lockedBuffer
+	slow := writerFunc(func(p []byte) (int, error) {
+		time.Sleep(20 * time.Millisecond)
+		return both.Write(p)
+	})
+	g := &globalFlags{resultFormat: "text", present: newPresenter(slow, ui.FormatPlain, ui.RetainOnFailure, time.Now)}
+	subject := app.Subject{Kind: app.ResourceContainer, Name: "odoo"}
+	g.present.Reporter().Report(app.StepStarted{ID: "1", Kind: app.StepCreate, Subject: subject})
+	g.present.Reporter().Report(app.StepFinished{ID: "1", Outcome: app.OutcomeDone})
+	if err := g.print(Dependencies{Stdout: &both, Getenv: func(string) string { return "" }}, stubResult{}, stubText{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	g.present.Close()
+	if out := both.String(); strings.HasPrefix(out, "stub") {
+		t.Fatalf("result came before progress:\n%s", out)
+	}
+}

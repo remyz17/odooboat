@@ -1,0 +1,4 @@
+dev  ⚠ partial
+  odoo      running   ob-myproject-dev-odoo-1a2b3c4d
+  volumes   ob-myproject-dev-postgres-data-1a2b3c4d, ob-myproject-dev-odoo-data-1a2b3c4d
+  ⚠ no masterPassword is configured: Odoo's database manager uses its default master password

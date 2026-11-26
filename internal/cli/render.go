@@ -19,6 +19,10 @@ type textRenderer interface{ RenderText(p *ui.Printer) error }
 // warnings are echoed on stderr unless the text rendering shows them.
 func (g *globalFlags) print(deps Dependencies, value any, text textRenderer, warnings []string) error {
 	if g.resultFormat == config.OutputText && text != nil {
+		// Progress reported so far is written before the result.
+		if g.present != nil {
+			g.present.Flush()
+		}
 		getenv := deps.getenv()
 		caps := ui.DetectCapabilities(deps.terminal().StdoutIsTerminal(), getenv, g.colorPreference, g.noColor)
 		return text.RenderText(ui.NewPrinter(deps.Stdout, caps, getenv("HOME")))
