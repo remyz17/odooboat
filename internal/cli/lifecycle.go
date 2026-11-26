@@ -26,7 +26,7 @@ func newUpCommand(deps Dependencies, global *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return global.print(deps, result, nil, result.Warnings)
+			return global.print(deps, result, upText(result), result.Warnings)
 		},
 	}
 	cmd.Flags().BoolVar(&pull, "pull", false, "pull missing base and PostgreSQL images, pinned by digest")
@@ -46,7 +46,7 @@ func newDownCommand(deps Dependencies, global *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return global.print(deps, result, nil, nil)
+			return global.print(deps, result, downText(result), nil)
 		},
 	}
 	addOverrideFlags(cmd)

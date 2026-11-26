@@ -1,0 +1,10 @@
+dev  ● running
+  url              http://127.0.0.1:54321
+  odoo image       built     odooboat/environment:7c1e5f0a9b3d
+  postgres image   pulled    docker.io/library/postgres:16-bookworm@sha256:0123456789ab
+  odoo             created   ob-myproject-dev-odoo-1a2b3c4d
+  postgres         created   ob-myproject-dev-postgres-1a2b3c4d
+  network          created   ob-myproject-dev-environment-1a2b3c4d
+  postgres-data    created   ob-myproject-dev-postgres-data-1a2b3c4d
+  odoo-data        created   ob-myproject-dev-odoo-data-1a2b3c4d
+  ⚠ no masterPassword is configured: Odoo's database manager uses its default master password

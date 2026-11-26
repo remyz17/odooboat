@@ -1,0 +1,6 @@
+dev  ○ down
+  postgres        removed   ob-myproject-dev-postgres-1a2b3c4d
+  network         removed   ob-myproject-dev-environment-1a2b3c4d
+  postgres-data   kept      ob-myproject-dev-postgres-data-1a2b3c4d
+  odoo-data       kept      ob-myproject-dev-odoo-data-1a2b3c4d
+  odoo            skipped   ob-myproject-dev-odoo-1a2b3c4d   claim read-only
