@@ -147,11 +147,11 @@ func TestStatusWarningsFollowProgressFormat(t *testing.T) {
 	root, base := cliStateProject(t)
 	deps := Dependencies{WorkingDir: root, Config: app.NewConfigService(),
 		Workspace: app.NewWorkspaceService(statefile.New(), statefile.New(), runtime.Connectors{}, "test")}
-	code, stderr := runCLI(t, deps, nil, append(base, "status", "--progress=plain")...)
+	code, stderr := runCLI(t, deps, nil, append(base, "status", "-o", "yaml", "--progress=plain")...)
 	if code != ExitOK || !strings.HasPrefix(stderr, "warning: no masterPassword") {
 		t.Fatalf("plain: exit %d, stderr %q", code, stderr)
 	}
-	code, stderr = runCLI(t, deps, nil, append(base, "status", "--progress=json")...)
+	code, stderr = runCLI(t, deps, nil, append(base, "status", "-o", "yaml", "--progress=json")...)
 	if code != ExitOK || stderr != "" {
 		t.Fatalf("json: exit %d, stderr %q", code, stderr)
 	}
@@ -283,7 +283,7 @@ func TestWarningsPrecedeResult(t *testing.T) {
 		Workspace: app.NewWorkspaceService(statefile.New(), statefile.New(), runtime.Connectors{}, "test")}
 	for range 3 {
 		both.Reset()
-		if code, _ := runCLI(t, deps, nil, append(base, "status", "--progress=plain")...); code != ExitOK {
+		if code, _ := runCLI(t, deps, nil, append(base, "status", "-o", "yaml", "--progress=plain")...); code != ExitOK {
 			t.Fatalf("exit %d", code)
 		}
 		if out := both.String(); !strings.HasPrefix(out, "warning: ") {

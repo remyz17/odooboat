@@ -63,7 +63,7 @@ func newStatusCommand(deps Dependencies, global *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return global.print(deps, result, nil, result.Warnings)
+			return global.print(deps, result, statusText(result), result.Warnings)
 		},
 	}
 	addOverrideFlags(cmd)

@@ -30,10 +30,10 @@ func TestLifecycleExitCodes(t *testing.T) {
 }
 
 // status reads local state only until a binding exists: an unbound
-// environment needs no runtime, and the result is YAML by default.
+// environment needs no runtime.
 func TestStatusOfAnUnboundEnvironment(t *testing.T) {
 	root, base := cliStateProject(t)
-	result := execute(t, root, append(base, "status")...)
+	result := execute(t, root, append(base, "status", "-o", "yaml")...)
 	var status struct {
 		Environment string   `yaml:"environment"`
 		Bound       bool     `yaml:"bound"`
@@ -47,6 +47,21 @@ func TestStatusOfAnUnboundEnvironment(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, ".odooboat")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("status changed the filesystem: %v", err)
+	}
+}
+
+// status renders as text when no format is asked for.
+func TestStatusDefaultsToText(t *testing.T) {
+	root, base := cliStateProject(t)
+	result := execute(t, root, append(base, "status")...)
+	if result.err != nil {
+		t.Fatal(result.err)
+	}
+	if first, _, _ := strings.Cut(result.stdout, "\n"); first != "default  - not bound" || strings.Contains(result.stdout, "environment:") {
+		t.Fatalf("status = %q, want text", result.stdout)
+	}
+	if strings.Contains(result.stderr, "masterPassword") {
+		t.Fatalf("text echoed its warning on stderr: %q", result.stderr)
 	}
 }
 
