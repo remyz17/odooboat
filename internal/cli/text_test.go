@@ -144,7 +144,7 @@ func withAction(r app.ResourceReport, action app.Action) app.ResourceReport {
 }
 
 const (
-	envImage      = "odooboat/environment:7c1e5f0a9b3d"
+	envImage      = "odooboat/environment:247d32734a9d17c8553bccc0c92c1fdcd51c0ab4c07a8013a1aee81097837b5e"
 	postgresImage = "docker.io/library/postgres:16-bookworm@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 )
 
