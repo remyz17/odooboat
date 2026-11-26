@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -203,5 +204,36 @@ func TestResolvePreferencesReadsOnlyUserConfig(t *testing.T) {
 	}
 	if prefs, err := ResolvePreferences(Options{WorkingDir: dir, UserConfigPath: filepath.Join(dir, "missing.yaml")}); err == nil {
 		t.Fatalf("missing explicit user config: prefs = %+v, want an error", prefs)
+	}
+}
+
+func writeUser(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "user.yaml")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestPreferencesOutputDefaultsToText(t *testing.T) {
+	prefs, err := ResolvePreferences(Options{WorkingDir: t.TempDir(), UserConfigPath: writeUser(t, "schema: 1\n")})
+	if err != nil || prefs.Output != OutputText || !prefs.Color {
+		t.Fatalf("preferences = %+v, %v; want text output and color", prefs, err)
+	}
+}
+
+func TestPreferencesOutputAcceptsText(t *testing.T) {
+	for output, wantErr := range map[string]bool{"text": false, "yaml": false, "json": false, "toml": true} {
+		prefs, err := ResolvePreferences(Options{WorkingDir: t.TempDir(), UserConfigPath: writeUser(t, "schema: 1\npreferences:\n  output: "+output+"\n")})
+		if wantErr {
+			if err == nil || !strings.Contains(err.Error(), "one of text, yaml, json") {
+				t.Errorf("%s: err = %v", output, err)
+			}
+			continue
+		}
+		if err != nil || prefs.Output != output {
+			t.Errorf("%s: preferences = %+v, %v", output, prefs, err)
+		}
 	}
 }

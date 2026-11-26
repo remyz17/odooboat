@@ -17,6 +17,7 @@ const (
 
 // Output preferences.
 const (
+	OutputText = "text"
 	OutputYAML = "yaml"
 	OutputJSON = "json"
 )

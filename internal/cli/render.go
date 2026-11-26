@@ -2,41 +2,32 @@ package cli
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 
+	"github.com/remyz17/odooboat/internal/cli/ui"
 	"github.com/remyz17/odooboat/internal/config"
 	"gopkg.in/yaml.v3"
 )
 
-func (g *globalFlags) format(cfg config.ResolvedConfig) (string, error) {
-	return g.formatOf(cfg.Preferences)
-}
+// textRenderer is implemented by the CLI presentation types of results that
+// have a text rendering (ADR 0011 §8). Application result types never
+// implement it.
+type textRenderer interface{ RenderText(p *ui.Printer) error }
 
-func (g *globalFlags) formatOf(prefs config.ResolvedPreferences) (string, error) {
-	if g.output == "" {
-		return prefs.Output, nil
+// print writes value on stdout in the invocation's result format. text nil
+// means the result has no text rendering yet: text falls back to yaml.
+// warnings are echoed on stderr unless the text rendering shows them.
+func (g *globalFlags) print(deps Dependencies, value any, text textRenderer, warnings []string) error {
+	if g.resultFormat == config.OutputText && text != nil {
+		getenv := deps.getenv()
+		caps := ui.DetectCapabilities(deps.terminal().StdoutIsTerminal(), getenv, g.colorPreference, g.noColor)
+		return text.RenderText(ui.NewPrinter(deps.Stdout, caps, getenv("HOME")))
 	}
-	return g.checkedFormat()
+	g.warn(warnings)
+	return marshal(deps.Stdout, g.resultFormat, value)
 }
 
-func (g *globalFlags) formatOrDefault() (string, error) {
-	if g.output == "" {
-		return config.OutputYAML, nil
-	}
-	return g.checkedFormat()
-}
-
-func (g *globalFlags) checkedFormat() (string, error) {
-	switch g.output {
-	case config.OutputYAML, config.OutputJSON:
-		return g.output, nil
-	default:
-		return "", fmt.Errorf("%w: unknown output format %q, expected yaml or json", ErrUsage, g.output)
-	}
-}
-
-func render(w io.Writer, format string, value any) error {
+func marshal(w io.Writer, format string, value any) error {
 	if format == config.OutputJSON {
 		encoder := json.NewEncoder(w)
 		encoder.SetIndent("", "  ")

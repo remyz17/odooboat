@@ -21,6 +21,7 @@ func NewTerminal(stdin, stdout, stderr *os.File) Terminal {
 }
 
 func (t fileTerminal) StderrIsTerminal() bool { return term.IsTerminal(int(t.stderr.Fd())) }
+func (t fileTerminal) StdoutIsTerminal() bool { return term.IsTerminal(int(t.stdout.Fd())) }
 
 func (t fileTerminal) Interactive() bool {
 	return term.IsTerminal(int(t.stdin.Fd())) && term.IsTerminal(int(t.stdout.Fd()))

@@ -113,6 +113,7 @@ func presenterOf(cmd *cobra.Command) *presenter {
 }
 
 var (
+	resultFormats   = []string{config.OutputText, config.OutputYAML, config.OutputJSON}
 	progressFormats = []string{string(ui.FormatAuto), string(ui.FormatPlain), string(ui.FormatJSON)}
 	retentionModes  = []string{string(ui.RetainOnFailure), string(ui.RetainAll)}
 )
@@ -120,10 +121,14 @@ var (
 // presentation is what selects the presenter of an invocation.
 type presentation struct {
 	progress, stepOutput, output, userConfig string
+	noColor                                  bool
 }
 
 // validate rejects unknown values with a usage error.
 func (s presentation) validate(cmd *cobra.Command) error {
+	if s.output != "" && !slices.Contains(resultFormats, s.output) {
+		return usageErrorf(cmd, "unknown output format %q, expected %s", s.output, "text, yaml, or json")
+	}
 	if !slices.Contains(progressFormats, s.progress) {
 		return usageErrorf(cmd, "unknown progress format %q, expected %s", s.progress, strings.Join(progressFormats, ", "))
 	}
@@ -133,9 +138,22 @@ func (s presentation) validate(cmd *cobra.Command) error {
 	return nil
 }
 
+// result resolves the result format and the colour preference: --output,
+// else the user's preferences, else text. A configuration error there means
+// the defaults; the command reports the error if it reads the configuration.
+func (s presentation) result(deps Dependencies) (format string, color bool) {
+	format, color = config.OutputText, true
+	if prefs, err := config.ResolvePreferences(config.Options{WorkingDir: deps.WorkingDir, UserConfigPath: s.userConfig}); err == nil {
+		format, color = prefs.Output, prefs.Color
+	}
+	if s.output != "" {
+		format = s.output
+	}
+	return format, color
+}
+
 // presenter builds the presenter s selects. auto needs to know whether the
-// result is json: --output says so, or else the user's preferences; a
-// configuration error there means "not json", and the command reports it.
+// result is json.
 func (s presentation) presenter(deps Dependencies) *presenter {
 	format, retention := ui.Format(s.progress), ui.Retention(s.stepOutput)
 	if !slices.Contains(progressFormats, s.progress) {
@@ -145,11 +163,8 @@ func (s presentation) presenter(deps Dependencies) *presenter {
 		retention = ui.RetainOnFailure
 	}
 	if format == ui.FormatAuto {
-		resultJSON := s.output == config.OutputJSON
-		if s.output == "" {
-			prefs, err := config.ResolvePreferences(config.Options{WorkingDir: deps.WorkingDir, UserConfigPath: s.userConfig})
-			resultJSON = err == nil && prefs.Output == config.OutputJSON
-		}
+		resultFormat, _ := s.result(deps)
+		resultJSON := resultFormat == config.OutputJSON
 		live := ui.LiveRedraw(deps.terminal().StderrIsTerminal(), deps.getenv())
 		format = ui.ResolveFormat(format, live, resultJSON)
 	}
@@ -178,6 +193,10 @@ func scanPresentation(args []string) presentation {
 		if target, known := targets[arg]; known && i+1 < len(args) {
 			*target = args[i+1]
 			i++
+			continue
+		}
+		if arg == "--no-color" {
+			s.noColor = true
 			continue
 		}
 		if strings.HasPrefix(arg, "-o") && len(arg) > 2 && !strings.HasPrefix(arg, "--") {

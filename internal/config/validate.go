@@ -81,9 +81,9 @@ func validateUserDocument(doc *loaded[UserDocument]) error {
 	}
 
 	if output := doc.doc.Preferences.Output; output != nil {
-		if *output != OutputYAML && *output != OutputJSON {
+		if *output != OutputText && *output != OutputYAML && *output != OutputJSON {
 			c.addField(ErrAuthored, FieldPreferencesOutput, ref.ref("preferences.output"),
-				"unknown output format", *output, "one of yaml, json")
+				"unknown output format", *output, "one of text, yaml, json")
 		}
 	}
 	return c.err()

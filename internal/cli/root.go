@@ -140,6 +140,11 @@ type globalFlags struct {
 	output         string
 	progress       string
 	stepOutput     string
+	noColor        bool
+	// resultFormat and colorPreference are resolved once, before the
+	// command runs (ADR 0011 §2).
+	resultFormat    string
+	colorPreference bool
 	// present is the invocation's presenter, set before any command runs.
 	present *presenter
 }
@@ -202,10 +207,12 @@ func NewRootCommand(deps Dependencies) *cobra.Command {
 	// Every command reports through one presenter, chosen before it runs
 	// (ADR 0011 §7).
 	root.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
-		s := presentation{progress: global.progress, stepOutput: global.stepOutput, output: global.output, userConfig: global.userConfigPath}
+		s := presentation{progress: global.progress, stepOutput: global.stepOutput, output: global.output,
+			userConfig: global.userConfigPath, noColor: global.noColor}
 		if err := s.validate(cmd); err != nil {
 			return err
 		}
+		global.resultFormat, global.colorPreference = s.result(deps)
 		global.present = s.presenter(deps)
 		cmd.SetContext(withPresenter(cmd.Context(), global.present))
 		return nil
@@ -215,7 +222,8 @@ func NewRootCommand(deps Dependencies) *cobra.Command {
 	flags.StringVar(&global.projectPath, "project", "", "path to the "+config.ProjectFileName+" project definition file")
 	flags.StringVar(&global.userConfigPath, "user-config", "", "path to the user configuration file")
 	flags.StringVar(&global.environment, "env", "", "environment to resolve (default \""+config.DefaultEnvironment+"\")")
-	flags.StringVarP(&global.output, "output", "o", "", "output format: yaml or json")
+	flags.StringVarP(&global.output, "output", "o", "", "result format: text, yaml, or json (default text, or preferences.output)")
+	flags.BoolVar(&global.noColor, "no-color", false, "disable colour on stdout")
 	flags.StringVar(&global.progress, "progress", string(ui.FormatAuto), "progress on stderr: auto, plain, or json")
 	flags.StringVar(&global.stepOutput, "step-output", string(ui.RetainOnFailure),
 		"output of finished steps: on-failure or all (on-failure shows the last 50 lines of a failed or interrupted step; output held by a process killed with SIGKILL is lost)")
