@@ -22,11 +22,7 @@ func newWorkspaceShowCommand(deps Dependencies, global *globalFlags) *cobra.Comm
 			if err != nil {
 				return err
 			}
-			format, err := global.formatOrDefault()
-			if err != nil {
-				return err
-			}
-			if err := render(deps.Stdout, format, result); err != nil {
+			if err := global.print(deps, result, nil, nil); err != nil {
 				return err
 			}
 			if result.Status == app.WorkspaceStatusDuplicate {
@@ -45,11 +41,7 @@ func newWorkspaceRekeyCommand(deps Dependencies, global *globalFlags) *cobra.Com
 			if err != nil {
 				return err
 			}
-			format, err := global.formatOrDefault()
-			if err != nil {
-				return err
-			}
-			return render(deps.Stdout, format, result)
+			return global.print(deps, result, nil, nil)
 		},
 	}
 }

@@ -23,11 +23,7 @@ func newEnvironmentShowCommand(deps Dependencies, global *globalFlags) *cobra.Co
 			if err != nil {
 				return err
 			}
-			format, err := global.formatOf(result.Preferences)
-			if err != nil {
-				return err
-			}
-			if err := render(deps.Stdout, format, result); err != nil {
+			if err := global.print(deps, result, nil, nil); err != nil {
 				return err
 			}
 			if result.WorkspaceStatus == app.WorkspaceStatusDuplicate {
@@ -48,11 +44,7 @@ func newEnvironmentBindCommand(deps Dependencies, global *globalFlags) *cobra.Co
 			if err != nil {
 				return err
 			}
-			format, err := global.formatOf(result.Preferences)
-			if err != nil {
-				return err
-			}
-			return render(deps.Stdout, format, result)
+			return global.print(deps, result, nil, nil)
 		},
 	}
 	addOverrideFlags(cmd)
@@ -71,11 +63,7 @@ func newEnvironmentVerifyCommand(deps Dependencies, global *globalFlags) *cobra.
 			if err != nil {
 				return err
 			}
-			format, err := global.formatOf(result.Preferences)
-			if err != nil {
-				return err
-			}
-			return render(deps.Stdout, format, result)
+			return global.print(deps, result, nil, nil)
 		},
 	}
 	addOverrideFlags(cmd)
@@ -100,11 +88,7 @@ func newEnvironmentBuildCommand(deps Dependencies, global *globalFlags) *cobra.C
 			if err != nil {
 				return err
 			}
-			format, err := global.formatOf(result.Preferences)
-			if err != nil {
-				return err
-			}
-			return render(deps.Stdout, format, result)
+			return global.print(deps, result, nil, nil)
 		},
 	}
 	cmd.Flags().BoolVar(&pull, "pull", false, "pull the base image, pinned by digest, if it is missing")

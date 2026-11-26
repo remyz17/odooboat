@@ -56,6 +56,9 @@ func ResolvePreferences(opts Options) (ResolvedPreferences, error) {
 		if user, err = decodeFile[UserDocument](SourceUser, path); err != nil {
 			return ResolvedPreferences{}, err
 		}
+		if err := validateUserDocument(user); err != nil {
+			return ResolvedPreferences{}, err
+		}
 	}
 	return resolvePreferences(Provenance{}, user), nil
 }
@@ -309,7 +312,7 @@ func normalizeSocket(base, value string) string {
 }
 
 func resolvePreferences(prov Provenance, user *loaded[UserDocument]) ResolvedPreferences {
-	prefs := ResolvedPreferences{Output: OutputYAML, Color: true}
+	prefs := ResolvedPreferences{Output: OutputText, Color: true}
 	prov.record(FieldPreferencesOutput, SourceRef{Kind: SourceDefault, Field: FieldPreferencesOutput})
 	prov.record(FieldPreferencesColor, SourceRef{Kind: SourceDefault, Field: FieldPreferencesColor})
 	if user == nil {

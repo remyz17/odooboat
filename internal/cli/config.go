@@ -98,11 +98,7 @@ func newConfigValidateCommand(deps Dependencies, global *globalFlags) *cobra.Com
 			if err != nil {
 				return err
 			}
-			format, err := global.format(result.Config)
-			if err != nil {
-				return err
-			}
-			return render(deps.Stdout, format, validateOutput{Valid: true, Sources: result.Sources})
+			return global.print(deps, validateOutput{Valid: true, Sources: result.Sources}, nil, nil)
 		},
 	}
 	addOverrideFlags(cmd)
@@ -121,11 +117,7 @@ func newConfigShowCommand(deps Dependencies, global *globalFlags) *cobra.Command
 			if err != nil {
 				return err
 			}
-			format, err := global.format(result.Config)
-			if err != nil {
-				return err
-			}
-			return render(deps.Stdout, format, showOutput{Sources: result.Sources, Config: result.Config})
+			return global.print(deps, showOutput{Sources: result.Sources, Config: result.Config}, nil, nil)
 		},
 	}
 	addOverrideFlags(cmd)
@@ -147,11 +139,7 @@ func newConfigExplainCommand(deps Dependencies, global *globalFlags) *cobra.Comm
 			if err != nil {
 				return err
 			}
-			format, err := global.formatOf(result.Preferences)
-			if err != nil {
-				return err
-			}
-			return render(deps.Stdout, format, result)
+			return global.print(deps, result, nil, nil)
 		},
 	}
 	addOverrideFlags(cmd)
@@ -173,11 +161,7 @@ func newInitCommand(deps Dependencies, global *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			format, err := global.formatOrDefault()
-			if err != nil {
-				return err
-			}
-			return render(deps.Stdout, format, initOutput{Created: result.Path})
+			return global.print(deps, initOutput{Created: result.Path}, nil, nil)
 		},
 	}
 	cmd.Flags().StringVar(&name, "name", "", "project name (default: the directory name)")
