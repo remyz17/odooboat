@@ -99,3 +99,69 @@ func (s statusText) state(containers []app.ResourceReport) (string, ui.Tone) {
 	}
 	return "stopped", ui.ToneIdle
 }
+
+// resourceLabel names a resource by its role; the network by its kind.
+func resourceLabel(r app.ResourceReport) string {
+	if r.Kind == runtime.ResourceNetwork {
+		return string(runtime.ResourceNetwork)
+	}
+	return string(r.Role)
+}
+
+// resourceRows gives one "<label>  <word>  <name>" row per resource, in
+// resource order, with the reason as a fourth cell when there is one.
+func resourceRows(p *ui.Printer, reports []app.ResourceReport, word func(app.ResourceReport) (string, ui.Tone)) [][]string {
+	var rows [][]string
+	for _, r := range sortResources(reports) {
+		text, tone := word(r)
+		row := []string{resourceLabel(r), p.Styled(text, tone), r.Name}
+		if r.Reason != "" {
+			row = append(row, r.Reason)
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+// actionWord styles what up did: a change is Done, kept is plain.
+func actionWord(r app.ResourceReport) (string, ui.Tone) {
+	if r.Action == app.ActionKept {
+		return string(r.Action), ui.ToneNone
+	}
+	return string(r.Action), ui.ToneDone
+}
+
+type upText app.UpResult
+
+func (u upText) RenderText(p *ui.Printer) error {
+	p.Headline(u.Environment, stateRunning, ui.ToneActive)
+	built, pulled := "built", "present"
+	if u.Odoo.Reused {
+		built = "reused"
+	}
+	if u.Postgres.Pulled {
+		pulled = "pulled"
+	}
+	rows := [][]string{
+		{"url", u.URL},
+		{"odoo image", built, p.Ref(u.Odoo.Image)},
+		{"postgres image", pulled, p.Ref(u.Postgres.Image)},
+	}
+	p.Rows(append(rows, resourceRows(p, u.Resources, actionWord)...)...)
+	p.Warnings(u.Warnings)
+	return p.Err()
+}
+
+type downText app.DownResult
+
+func (d downText) RenderText(p *ui.Printer) error {
+	p.Headline(d.Environment, "down", ui.ToneIdle)
+	word := func(text string, tone ui.Tone) func(app.ResourceReport) (string, ui.Tone) {
+		return func(app.ResourceReport) (string, ui.Tone) { return text, tone }
+	}
+	rows := resourceRows(p, d.Removed, word(string(app.ActionRemoved), ui.ToneDone))
+	rows = append(rows, resourceRows(p, d.Kept, word(string(app.ActionKept), ui.ToneNone))...)
+	rows = append(rows, resourceRows(p, d.Skipped, word("skipped", ui.ToneWarn))...)
+	p.Rows(rows...)
+	return p.Err()
+}

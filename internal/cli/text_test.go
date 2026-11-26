@@ -134,3 +134,58 @@ func TestTextLayoutIgnoresCapabilities(t *testing.T) {
 		}
 	}
 }
+
+func withAction(r app.ResourceReport, action app.Action) app.ResourceReport {
+	r.Action, r.State = action, ""
+	return r
+}
+
+const (
+	envImage      = "odooboat/environment:7c1e5f0a9b3d"
+	postgresImage = "docker.io/library/postgres:16-bookworm@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+)
+
+func upResult(action app.Action, reused, pulled bool, warnings []string) app.UpResult {
+	var resources []app.ResourceReport
+	for _, r := range runningStatus().Resources {
+		resources = append(resources, withAction(r, action))
+	}
+	return app.UpResult{
+		Environment: "dev", URL: "http://127.0.0.1:54321",
+		Odoo:      app.UpImage{Image: envImage, ImageID: "sha256:feedface", Reused: reused},
+		Postgres:  app.UpImage{Image: postgresImage, Pulled: pulled},
+		Resources: resources, Warnings: warnings,
+	}
+}
+
+func TestUpText(t *testing.T) {
+	for name, result := range map[string]app.UpResult{
+		"up_created": upResult(app.ActionCreated, false, true, []string{masterPasswordWarning}),
+		"up_kept":    upResult(app.ActionKept, true, false, nil),
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := renderText(t, upText(result), unicodeCaps)
+			goldenText(t, name, got)
+			if lines := strings.Split(got, "\n"); !strings.HasPrefix(lines[1], "  url ") {
+				t.Fatalf("first row %q, want the URL", lines[1])
+			}
+		})
+	}
+}
+
+func TestDownText(t *testing.T) {
+	status := runningStatus().Resources
+	down := app.DownResult{Environment: "dev",
+		Removed: []app.ResourceReport{withAction(status[3], app.ActionRemoved), withAction(status[1], app.ActionRemoved), withAction(status[2], app.ActionRemoved)},
+		Kept:    []app.ResourceReport{volume(runtime.RolePostgresData, status[4].Name), volume(runtime.RoleOdooData, status[0].Name)},
+		Skipped: []app.ResourceReport{},
+	}
+	skipped := down
+	skipped.Removed = down.Removed[1:]
+	skipped.Skipped = []app.ResourceReport{{Kind: runtime.ResourceContainer, Role: runtime.RoleOdoo, Name: status[3].Name, Reason: "claim read-only"}}
+	for name, result := range map[string]app.DownResult{"down": down, "down_skipped": skipped} {
+		t.Run(name, func(t *testing.T) {
+			goldenText(t, name, renderText(t, downText(result), unicodeCaps))
+		})
+	}
+}
