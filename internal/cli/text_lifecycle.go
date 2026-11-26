@@ -54,7 +54,8 @@ func (s statusText) RenderText(p *ui.Printer) error {
 	p.Headline(s.Environment, state, tone)
 
 	var rows [][]string
-	if s.URL != "" {
+	// The URL answers only when the application says the environment runs.
+	if s.Running && s.URL != "" {
 		rows = append(rows, []string{"url", s.URL})
 	}
 	for _, c := range containers {
@@ -80,6 +81,7 @@ func (s statusText) RenderText(p *ui.Printer) error {
 }
 
 // state is the headline state: running, partial, stopped, down, or not bound.
+// running is the application's verdict, never recomputed here.
 func (s statusText) state(containers []app.ResourceReport) (string, ui.Tone) {
 	running := 0
 	for _, c := range containers {
@@ -92,7 +94,7 @@ func (s statusText) state(containers []app.ResourceReport) (string, ui.Tone) {
 		return "not bound", ui.ToneIdle
 	case len(containers) == 0:
 		return "down", ui.ToneIdle
-	case running == len(containers):
+	case s.Running:
 		return stateRunning, ui.ToneActive
 	case running > 0:
 		return "partial", ui.ToneWarn

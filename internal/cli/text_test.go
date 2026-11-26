@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -93,9 +94,15 @@ func TestStatusText(t *testing.T) {
 		t.Fatalf("running status:\n%s\nwant the ADR 0011 §8 example:\n%s", got, adrStatus)
 	}
 
+	// The application sets the URL whenever Odoo runs, and Running only
+	// when PostgreSQL runs too.
 	partial := runningStatus()
-	partial.Running, partial.URL = false, ""
+	partial.Running = false
 	partial.Resources[1].State = "exited (1)"
+
+	odooOnly := runningStatus()
+	odooOnly.Running = false
+	odooOnly.Resources = slices.Delete(slices.Clone(odooOnly.Resources), 1, 2)
 	partial.Orphans = []app.ResourceReport{container(runtime.RoleOdoo, "ob-myproject-old-odoo-9f8e7d6c", "exited (0)")}
 
 	stopped := runningStatus()
@@ -110,13 +117,13 @@ func TestStatusText(t *testing.T) {
 		Warnings: []string{masterPasswordWarning}}
 
 	for name, result := range map[string]app.StatusResult{
-		"status_running": running, "status_partial": partial, "status_stopped": stopped,
+		"status_running": running, "status_partial": partial, "status_odoo_only": odooOnly, "status_stopped": stopped,
 		"status_down": down, "status_not_bound": notBound,
 	} {
 		t.Run(name, func(t *testing.T) {
 			got := renderText(t, statusText(result), unicodeCaps)
 			goldenText(t, name, got)
-			if result.URL == "" && (strings.Contains(got, "url") || strings.Contains(got, "running\n")) {
+			if !result.Running && (strings.Contains(got, "url") || strings.Contains(got, "running\n")) {
 				t.Fatalf("%s claims a running environment:\n%s", name, got)
 			}
 		})
