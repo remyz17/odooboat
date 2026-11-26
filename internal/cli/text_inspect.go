@@ -7,7 +7,6 @@ import (
 	"github.com/remyz17/odooboat/internal/app"
 	"github.com/remyz17/odooboat/internal/cli/ui"
 	"github.com/remyz17/odooboat/internal/config"
-	"github.com/remyz17/odooboat/internal/workspace"
 )
 
 // Text renderings of the inspection results (ADR 0011 §8).
@@ -30,15 +29,17 @@ func refText(p *ui.Printer, r config.SourceRef) string {
 }
 
 // connectionText shows a runtime connection: "local (docker, desktop-linux)".
-func connectionText(p *ui.Printer, c workspace.Connection) string {
-	where := c.Context
-	if where == "" && c.Socket != "" {
-		where = p.Path(c.Socket)
+// It takes the fields, not the type: the CLI reaches workspace state only
+// through internal/app.
+func connectionText(p *ui.Printer, alias, kind, context, socket string) string {
+	where := context
+	if where == "" && socket != "" {
+		where = p.Path(socket)
 	}
 	if where == "" {
-		return fmt.Sprintf("%s (%s)", c.Alias, c.Kind)
+		return fmt.Sprintf("%s (%s)", alias, kind)
 	}
-	return fmt.Sprintf("%s (%s, %s)", c.Alias, c.Kind, where)
+	return fmt.Sprintf("%s (%s, %s)", alias, kind, where)
 }
 
 type explainText app.ExplainResult
@@ -123,13 +124,14 @@ func (e environmentShowText) RenderText(p *ui.Printer) error {
 	if e.WorkspaceID != "" {
 		workspaceRow = append(workspaceRow, p.ID(e.WorkspaceID))
 	}
-	rows := [][]string{workspaceRow, {"runtime", connectionText(p, e.DesiredConnection)}}
+	rows := [][]string{workspaceRow, {"runtime", connectionText(p, e.DesiredConnection.Alias, e.DesiredConnection.Kind, e.DesiredConnection.Context, e.DesiredConnection.Socket)}}
 	if e.BoundConnection != nil {
 		match := "matches"
 		if e.Matches != nil && !*e.Matches {
 			match = p.Styled("differs", ui.ToneWarn)
 		}
-		rows = append(rows, []string{"bound", match, connectionText(p, *e.BoundConnection)})
+		c := e.BoundConnection
+		rows = append(rows, []string{"bound", match, connectionText(p, c.Alias, c.Kind, c.Context, c.Socket)})
 	}
 	if engine := e.Engine; engine != nil {
 		if engine.Unavailable {
