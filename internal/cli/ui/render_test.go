@@ -211,3 +211,15 @@ func TestPlainOutputPrefixIsShort(t *testing.T) {
 		}
 	}
 }
+
+func TestPlainShortensImageReferences(t *testing.T) {
+	hash := strings.Repeat("0123456789abcdef", 4)
+	var b bytes.Buffer
+	feed(NewPlain(&b),
+		timed{0, app.StepStarted{ID: "1", Kind: app.StepBuild, Subject: app.Subject{Kind: app.ResourceImage, Name: "odooboat/environment:" + hash}}},
+		timed{0, app.StepFinished{ID: "1", Outcome: app.OutcomeDone}},
+	)
+	if !strings.Contains(b.String(), "build image odooboat/environment:"+hash[:12]) || strings.Contains(b.String(), hash) {
+		t.Fatalf("plain:\n%s", b.String())
+	}
+}
