@@ -31,8 +31,11 @@ type tty struct {
 
 	steps map[string]*ttyStep
 	roots []string // top-level steps, in start order
-	seq   int
-	ticks int
+	// orphans hold output and transfers of steps whose start was never
+	// seen: they are not drawn, as plain prints nothing for them.
+	orphans map[string]*ttyStep
+	seq     int
+	ticks   int
 
 	drawn   int      // lines of the live region on screen
 	hold    bool     // a session owns the terminal: nothing is drawn
@@ -54,7 +57,7 @@ type ttyStep struct {
 
 // NewTTY returns the live renderer writing to w.
 func NewTTY(w io.Writer, retention Retention, view View) Sink {
-	return &tty{w: w, retention: retention, view: view, steps: map[string]*ttyStep{}}
+	return &tty{w: w, retention: retention, view: view, steps: map[string]*ttyStep{}, orphans: map[string]*ttyStep{}}
 }
 
 func (t *tty) Handle(r Record) {
@@ -62,7 +65,7 @@ func (t *tty) Handle(r Record) {
 	case app.StepStarted:
 		t.start(e, r.Time)
 	case app.StepFinished:
-		s := t.step(e.ID, r.Time)
+		s := t.adopt(e.ID, r.Time)
 		s.finished, s.outcome, s.end = true, e.Outcome, r.Time
 		if t.retention == RetainAll {
 			if line, ok := s.all.rest(); ok {
@@ -95,10 +98,10 @@ func (t *tty) Handle(r Record) {
 		var lines []string
 		for _, id := range t.roots {
 			t.walk(t.steps[id], 0, func(s *ttyStep, depth int) {
-				lines = append(lines, strings.Repeat("  ", depth)+stepLabel(s.started, true)+"  "+elapsed(r.Time.Sub(s.at)))
+				lines = append(lines, strings.Repeat("  ", depth)+s.label()+"  "+elapsed(r.Time.Sub(s.at)))
 			})
 		}
-		t.roots, t.steps = nil, map[string]*ttyStep{}
+		t.roots, t.steps, t.orphans = nil, map[string]*ttyStep{}, map[string]*ttyStep{}
 		t.paint(r.Time, lines, false)
 	default:
 		if text, ok := messageText(r.Event); ok {
@@ -178,9 +181,9 @@ func (t *tty) commit(root *ttyStep) []string {
 func (t *tty) finalLine(s *ttyStep, depth int) string {
 	indent := strings.Repeat("  ", depth)
 	if s.running() {
-		return indent + stepLabel(s.started, true)
+		return indent + s.label()
 	}
-	parts := []string{stepLabel(s.started, true)}
+	parts := []string{s.label()}
 	if s.outcome != app.OutcomeDone {
 		parts = append(parts, string(s.outcome))
 	}
@@ -206,16 +209,40 @@ func (t *tty) start(e app.StepStarted, at time.Time) *ttyStep {
 	return s
 }
 
-// step returns the step id, or a top-level stand-in named after the id
-// when its start was never seen, as plain does.
+// step returns the step id, or an undrawn orphan named after the id when
+// its start was never seen.
 func (t *tty) step(id string, at time.Time) *ttyStep {
 	if s, ok := t.steps[id]; ok {
 		return s
 	}
-	return t.start(app.StepStarted{ID: id, Subject: app.Subject{Name: id}}, at)
+	if s, ok := t.orphans[id]; ok {
+		return s
+	}
+	s := &ttyStep{started: app.StepStarted{ID: id, Subject: app.Subject{Name: id}}, at: at}
+	t.orphans[id] = s
+	return s
+}
+
+// adopt returns the step id for its finish; an orphan becomes a top-level
+// step, so its line and retained output are committed as plain does.
+func (t *tty) adopt(id string, at time.Time) *ttyStep {
+	if s, ok := t.steps[id]; ok {
+		return s
+	}
+	s := t.step(id, at)
+	delete(t.orphans, id)
+	t.seq++
+	s.seq = t.seq
+	t.steps[id] = s
+	t.roots = append(t.roots, id)
+	return s
 }
 
 func (s *ttyStep) hidden() bool { return hiddenKind(s.started.Subject.Kind) }
+
+// label words the step on one line: a name may hold a whole multi-line
+// command.
+func (s *ttyStep) label() string { return sanitize(stepLabel(s.started, true)) }
 
 func (s *ttyStep) running() bool { return !s.finished }
 
