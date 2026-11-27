@@ -56,7 +56,7 @@ func (p *plain) Handle(r Record) {
 		}
 	case app.StepFinished:
 		s := p.step(e.ID)
-		p.endLine(e.ID, s)
+		p.endLine(s)
 		delete(p.steps, e.ID)
 		failed := e.Outcome == app.OutcomeFailed || e.Outcome == app.OutcomeInterrupted
 		if !s.hidden() || failed {
@@ -128,7 +128,7 @@ func outputPrefix(name string) string {
 }
 
 // endLine writes an unterminated output line before the step's finish.
-func (p *plain) endLine(id string, s *plainStep) {
+func (p *plain) endLine(s *plainStep) {
 	if len(s.partial) > 0 {
 		p.writeLine(s)
 	}
