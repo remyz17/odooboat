@@ -1,0 +1,7 @@
+✓ build image odooboat/environment:0123456789ab  reused  0.4s
+✓ pull image postgres:16 (postgres)  2.0s
+✓ create network ob-shop-dev-1a2b3c4d  0.1s
+✓ start container ob-shop-dev-postgres-1a2b3c4d (postgres)  2.0s
+  ✓ wait container ob-shop-dev-postgres-1a2b3c4d (postgres)  2.0s
+✓ start container ob-shop-dev-odoo-1a2b3c4d (odoo)  6.0s
+  ✓ wait container ob-shop-dev-odoo-1a2b3c4d (odoo)  6.0s

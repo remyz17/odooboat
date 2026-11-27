@@ -166,3 +166,200 @@ func TestTTYTailSanitizes(t *testing.T) {
 		t.Fatalf("frame:\n%q", lines)
 	}
 }
+
+func ttyOn(w io.Writer, retention Retention) *tty {
+	return NewTTY(w, retention, View{Caps: Capabilities{Unicode: true}, Size: func() (int, int) { return 80, 24 }}).(*tty)
+}
+
+// upSequence is an up: a reused build, a pull, a network, and two
+// containers started and waited for.
+func upSequence() []timed {
+	pg := app.Subject{Kind: app.ResourceContainer, Name: "ob-shop-dev-postgres-1a2b3c4d", Role: app.RolePostgres}
+	net := app.Subject{Kind: app.ResourceNetwork, Name: "ob-shop-dev-1a2b3c4d"}
+	return []timed{
+		{0, app.StepStarted{ID: "1", Kind: app.StepBuild, Subject: envImage}},
+		{secs(0.1), Tick{}},
+		{secs(0.4), app.StepFinished{ID: "1", Outcome: app.OutcomeReused}},
+		{secs(1), app.StepStarted{ID: "2", Kind: app.StepPull, Subject: pgImage}},
+		{secs(1), app.StepStarted{ID: "3", Parent: "2", Kind: app.StepPull, Subject: layerName(1)}},
+		{secs(1), app.StepStarted{ID: "4", Parent: "2", Kind: app.StepPull, Subject: layerName(2)}},
+		{secs(1.5), app.Transfer{ID: "3", Current: 10_000_000, Total: 100_000_000}},
+		{secs(1.5), Tick{}},
+		{secs(2), app.StepFinished{ID: "3", Outcome: app.OutcomeDone}},
+		{secs(2), app.StepFinished{ID: "4", Outcome: app.OutcomeKept}},
+		{secs(3), app.StepFinished{ID: "2", Outcome: app.OutcomeDone}},
+		{secs(3), app.StepStarted{ID: "5", Kind: app.StepCreate, Subject: net}},
+		{secs(3.1), app.StepFinished{ID: "5", Outcome: app.OutcomeDone}},
+		{secs(4), app.StepStarted{ID: "6", Kind: app.StepStart, Subject: pg}},
+		{secs(4), app.StepStarted{ID: "7", Parent: "6", Kind: app.StepWait, Subject: pg}},
+		{secs(4.5), Tick{}},
+		{secs(6), app.StepFinished{ID: "7", Outcome: app.OutcomeDone}},
+		{secs(6), app.StepFinished{ID: "6", Outcome: app.OutcomeDone}},
+		{secs(6), app.StepStarted{ID: "8", Kind: app.StepStart, Subject: odooCtr}},
+		{secs(6), app.StepStarted{ID: "9", Parent: "8", Kind: app.StepWait, Subject: odooCtr}},
+		{secs(7), Tick{}},
+		{secs(12), app.StepFinished{ID: "9", Outcome: app.OutcomeDone}},
+		{secs(12), app.StepFinished{ID: "8", Outcome: app.OutcomeDone}},
+		{secs(12), Finish{}},
+	}
+}
+
+func TestTTYScrollbackGolden(t *testing.T) {
+	v := newVT(t)
+	feed(ttyOn(v, RetainOnFailure), upSequence()...)
+	golden(t, "tty_scrollback.golden", []byte(v.Text()))
+}
+
+func TestTTYCommittedTextIsClean(t *testing.T) {
+	v := newVT(t)
+	feed(ttyOn(v, RetainOnFailure), upSequence()...)
+	text := v.Text()
+	for _, bad := range append([]string{"\x1b", "layer"}, spinnerUnicode...) {
+		if strings.Contains(text, bad) {
+			t.Errorf("scrollback contains %q:\n%s", bad, text)
+		}
+	}
+}
+
+func TestTTYRedrawOnlyOnTick(t *testing.T) {
+	v := newVT(t)
+	s := ttyOn(v, RetainOnFailure)
+	feed(s, timed{0, app.StepStarted{ID: "1", Kind: app.StepCreate, Subject: odooCtr}})
+	for range 20 {
+		feed(s, timed{0, app.StepOutput{ID: "1", Data: []byte("x\n")}})
+	}
+	if v.written != 0 {
+		t.Fatalf("wrote %d bytes before a tick", v.written)
+	}
+	feed(s, timed{secs(1), Tick{}})
+	if lines := v.Lines(); len(lines) != 9 || !strings.Contains(lines[0], "create container") {
+		t.Fatalf("after a tick:\n%s", v.Text())
+	}
+}
+
+func TestTTYCommitIsImmediate(t *testing.T) {
+	v := newVT(t)
+	feed(ttyOn(v, RetainOnFailure),
+		timed{0, app.StepStarted{ID: "1", Kind: app.StepCreate, Subject: app.Subject{Kind: app.ResourceVolume, Name: "v1"}}},
+		timed{0, Tick{}},
+		timed{secs(1), app.StepFinished{ID: "1", Outcome: app.OutcomeDone}},
+	)
+	if got := v.Text(); got != "✓ create volume v1  1.0s\n" {
+		t.Fatalf("scrollback %q", got)
+	}
+}
+
+func failingBuild(lines int) []timed {
+	var out strings.Builder
+	for i := 1; i <= lines; i++ {
+		fmt.Fprintf(&out, "out %d\n", i)
+	}
+	return []timed{
+		{0, app.StepStarted{ID: "1", Kind: app.StepBuild, Subject: envImage}},
+		{0, app.StepStarted{ID: "2", Parent: "1", Kind: app.StepBuild, Subject: pipStep}},
+		{secs(1), app.StepOutput{ID: "2", Data: []byte(out.String())}},
+		{secs(1), Tick{}},
+		{secs(2), app.StepFinished{ID: "2", Outcome: app.OutcomeFailed}},
+		{secs(2), app.StepFinished{ID: "1", Outcome: app.OutcomeFailed}},
+		{secs(2), Finish{}},
+	}
+}
+
+func TestTTYFailedBuildStep(t *testing.T) {
+	v := newVT(t)
+	feed(ttyOn(v, RetainOnFailure), failingBuild(60)...)
+	lines := v.Lines()
+	if len(lines) != 52 || !strings.HasPrefix(lines[0], "✗ build image") ||
+		lines[1] != "  ✗ build build-step [3/7] RUN pip install -r requirements.txt  failed  2.0s" ||
+		lines[2] != "    │ out 11" || lines[51] != "    │ out 60" {
+		t.Fatalf("on-failure:\n%s", v.Text())
+	}
+
+	v = newVT(t)
+	feed(ttyOn(v, RetainAll), failingBuild(60)...)
+	lines = v.Lines()
+	if len(lines) != 62 || lines[0] != "  [3/7] | out 1" || lines[59] != "  [3/7] | out 60" ||
+		!strings.HasPrefix(lines[60], "✗ build image") || strings.Contains(v.Text(), "│") {
+		t.Fatalf("all:\n%s", v.Text())
+	}
+}
+
+func TestTTYInterrupted(t *testing.T) {
+	v := newVT(t)
+	feed(ttyOn(v, RetainOnFailure),
+		timed{0, app.StepStarted{ID: "1", Kind: app.StepPull, Subject: pgImage}},
+		timed{0, app.StepStarted{ID: "2", Parent: "1", Kind: app.StepPull, Subject: layerName(1)}},
+		timed{secs(1), Tick{}},
+		timed{secs(2), app.StepFinished{ID: "2", Outcome: app.OutcomeInterrupted}},
+		timed{secs(2), app.StepFinished{ID: "1", Outcome: app.OutcomeInterrupted}},
+		timed{secs(2), ErrorReport{Message: "interrupted"}},
+		timed{secs(2), Finish{}},
+	)
+	want := "✗ pull image postgres:16 (postgres)  interrupted  2.0s\n" +
+		"  ✗ pull layer a1b2c3d4e5f1  interrupted  2.0s\n" +
+		"error: interrupted\n"
+	if got := v.Text(); got != want {
+		t.Fatalf("scrollback:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestTTYMessagesAboveRegion(t *testing.T) {
+	v := newVT(t)
+	feed(ttyOn(v, RetainOnFailure),
+		timed{0, app.StepStarted{ID: "1", Kind: app.StepCreate, Subject: app.Subject{Kind: app.ResourceVolume, Name: "v1"}}},
+		timed{0, Tick{}},
+		timed{secs(1), Warning{Message: "disk"}},
+	)
+	if lines := v.Lines(); len(lines) != 2 || lines[0] != "warning: disk" || !strings.Contains(lines[1], "create volume v1") {
+		t.Fatalf("screen:\n%s", v.Text())
+	}
+}
+
+func TestTTYSettleAndHold(t *testing.T) {
+	v := newVT(t)
+	s := ttyOn(v, RetainOnFailure)
+	feed(s,
+		timed{0, app.StepStarted{ID: "1", Kind: app.StepCreate, Subject: app.Subject{Kind: app.ResourceVolume, Name: "v1"}}},
+		timed{0, Tick{}},
+		timed{0, Settle{}},
+	)
+	if got := v.Text(); got != "" {
+		t.Fatalf("after Settle: %q", got)
+	}
+	feed(s, timed{0, Settle{Hold: true}})
+	before := v.written
+	feed(s, timed{secs(1), Tick{}}, timed{secs(1), app.StepOutput{ID: "1", Data: []byte("x\n")}}, timed{secs(2), Tick{}},
+		timed{secs(2), Settle{Hold: false}})
+	if v.written != before {
+		t.Fatalf("held: wrote %d bytes", v.written-before)
+	}
+	feed(s, timed{secs(3), Tick{}})
+	if lines := v.Lines(); len(lines) == 0 || !strings.Contains(lines[0], "create volume v1") {
+		t.Fatalf("after release:\n%s", v.Text())
+	}
+}
+
+func TestTTYUnknownStep(t *testing.T) {
+	v := newVT(t)
+	feed(ttyOn(v, RetainOnFailure),
+		timed{0, app.StepOutput{ID: "9", Data: []byte("x\n")}},
+		timed{0, app.Transfer{ID: "9", Current: 1}},
+		timed{secs(1), app.StepFinished{ID: "9", Outcome: app.OutcomeFailed}},
+		timed{secs(1), Finish{}},
+	)
+	if text := v.Text(); !strings.Contains(text, "9  failed") {
+		t.Fatalf("scrollback:\n%s", text)
+	}
+}
+
+func TestTTYFinishCommitsOpenSteps(t *testing.T) {
+	v := newVT(t)
+	feed(ttyOn(v, RetainOnFailure),
+		timed{0, app.StepStarted{ID: "1", Kind: app.StepCreate, Subject: app.Subject{Kind: app.ResourceVolume, Name: "v1"}}},
+		timed{0, Tick{}},
+		timed{secs(2), Finish{}},
+	)
+	if got := v.Text(); got != "create volume v1  2.0s\n" {
+		t.Fatalf("scrollback %q", got)
+	}
+}

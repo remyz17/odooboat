@@ -172,6 +172,13 @@ func (t *tty) symbol(tone Tone) string {
 	return symbol
 }
 
+func (t *tty) bar() string {
+	if t.view.Caps.Unicode {
+		return "│ "
+	}
+	return "| "
+}
+
 func (t *tty) ellipsis() string {
 	if t.view.Caps.Unicode {
 		return "…"
@@ -250,11 +257,7 @@ func fitStep(prefix, label, detail, took string, width int, ellipsis string) str
 // tailLine shows one output line under its step, without the output's own
 // control sequences.
 func (t *tty) tailLine(indent, line string, width int) string {
-	bar := "| "
-	if t.view.Caps.Unicode {
-		bar = "│ "
-	}
-	text := indent + "  " + bar + sanitize(line)
+	text := indent + "  " + t.bar() + sanitize(line)
 	if width > 0 {
 		text = ansi.Truncate(text, width-1, "")
 	}
