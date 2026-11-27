@@ -78,9 +78,9 @@ func TestPrinterRowsAlignStyledCells(t *testing.T) {
 	}
 }
 
-var ansi = regexp.MustCompile("\x1b\\[[0-9;]*m")
+var sgr = regexp.MustCompile("\x1b\\[[0-9;]*m")
 
-func stripANSI(s string) string { return ansi.ReplaceAllString(s, "") }
+func stripANSI(s string) string { return sgr.ReplaceAllString(s, "") }
 
 func TestPrinterDecoration(t *testing.T) {
 	render := func(caps Capabilities) string {
