@@ -19,3 +19,10 @@ type Warning struct{ Message string }
 
 // Sink handles records one at a time, in order.
 type Sink interface{ Handle(Record) }
+
+// Settle erases the live region of the tty renderer. Hold true stops it
+// drawing until a Settle with Hold false: a session owns the terminal.
+type Settle struct{ Hold bool }
+
+// Finish ends the invocation: renderers write what they still hold.
+type Finish struct{}
