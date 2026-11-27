@@ -130,3 +130,22 @@ func waitFor(t *testing.T, cond func() bool) {
 		time.Sleep(time.Millisecond)
 	}
 }
+
+func TestQueueCoalescesTicks(t *testing.T) {
+	sink := &sinkLog{release: make(chan struct{})}
+	q := NewQueue(sink, fixedClock())
+	q.Report(app.StepStarted{ID: "A"})
+	waitFor(t, func() bool { return q.pending() == 0 })
+	for range 3 {
+		q.Post(Record{Event: Tick{}})
+	}
+	q.Report(app.StepStarted{ID: "B"})
+	q.Post(Record{Event: Tick{}})
+	q.Post(Record{Event: Tick{}})
+	close(sink.release)
+	q.Close()
+	want := []any{app.StepStarted{ID: "A"}, Tick{}, app.StepStarted{ID: "B"}, Tick{}}
+	if got := sink.events(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("delivered %#v, want %#v", got, want)
+	}
+}

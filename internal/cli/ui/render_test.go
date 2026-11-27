@@ -223,3 +223,16 @@ func TestPlainShortensImageReferences(t *testing.T) {
 		t.Fatalf("plain:\n%s", b.String())
 	}
 }
+
+func TestPlainAndJSONIgnoreSettleAndFinish(t *testing.T) {
+	for name, sink := range map[string]func(*bytes.Buffer) Sink{
+		"plain": func(b *bytes.Buffer) Sink { return NewPlain(b) },
+		"json":  func(b *bytes.Buffer) Sink { return NewJSON(b) },
+	} {
+		var b bytes.Buffer
+		feed(sink(&b), timed{0, Settle{}}, timed{0, Settle{Hold: true}}, timed{0, Finish{}})
+		if b.Len() != 0 {
+			t.Errorf("%s wrote %q", name, b.String())
+		}
+	}
+}

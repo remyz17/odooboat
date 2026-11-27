@@ -36,12 +36,18 @@ func NewQueue(sink Sink, now func() time.Time) *Queue {
 func (q *Queue) Report(e app.Event) { q.Post(Record{Time: q.now(), Event: e}) }
 
 // Post queues a prepared record. A Transfer replaces a queued Transfer of
-// the same step when that one is last in line; nothing else is coalesced.
+// the same step when that one is last in line, and a Tick is dropped when a
+// Tick is last in line; nothing else is coalesced.
 func (q *Queue) Post(r Record) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if q.closed {
 		return
+	}
+	if _, ok := r.Event.(Tick); ok && len(q.records) > 0 {
+		if _, ok := q.records[len(q.records)-1].Event.(Tick); ok {
+			return
+		}
 	}
 	if t, ok := r.Event.(app.Transfer); ok && len(q.records) > 0 {
 		if last, ok := q.records[len(q.records)-1].Event.(app.Transfer); ok && last.ID == t.ID {
