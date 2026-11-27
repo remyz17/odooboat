@@ -73,9 +73,9 @@ jobs:
             exit 1
           fi
           # Styles stay in the presentation package (ADR 0011 §12).
-          if go list -f '{{.ImportPath}}: {{join .Imports " "}}' ./... | grep 'charm.land/lipgloss' \
+          if go list -f '{{.ImportPath}}: {{join .Imports " "}}' ./... | grep -E 'charm.land/lipgloss|github.com/charmbracelet/x/ansi' \
             | grep -vE '^github.com/remyz17/odooboat/internal/cli/ui:'; then
-            echo "lipgloss must remain inside internal/cli/ui"
+            echo "lipgloss and x/ansi must remain inside internal/cli/ui"
             exit 1
           fi
           if go list -deps ./internal/app ./internal/cli | grep -q '/internal/runtime/docker$'; then

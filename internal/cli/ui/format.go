@@ -5,18 +5,20 @@ type Format string
 
 const (
 	FormatAuto  Format = "auto"
+	FormatTTY   Format = "tty"
 	FormatPlain Format = "plain"
 	FormatJSON  Format = "json"
 )
 
-// ResolveFormat resolves auto: json when stderr cannot redraw and the result
-// is json, plain otherwise. Where it would resolve to tty, it resolves to
-// plain until the tty renderer exists (ADR 0011 §11).
+// ResolveFormat resolves auto (ADR 0011 §7): tty when stderr can be
+// redrawn, else json when the result is json, else plain.
 func ResolveFormat(requested Format, live, resultJSON bool) Format {
-	if requested != FormatAuto {
+	switch {
+	case requested != FormatAuto:
 		return requested
-	}
-	if !live && resultJSON {
+	case live:
+		return FormatTTY
+	case resultJSON:
 		return FormatJSON
 	}
 	return FormatPlain

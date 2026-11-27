@@ -224,7 +224,7 @@ func NewRootCommand(deps Dependencies) *cobra.Command {
 	flags.StringVar(&global.environment, "env", "", "environment to resolve (default \""+config.DefaultEnvironment+"\")")
 	flags.StringVarP(&global.output, "output", "o", "", "result format: text, yaml, or json (default text, or preferences.output)")
 	flags.BoolVar(&global.noColor, "no-color", false, "disable colour on stdout")
-	flags.StringVar(&global.progress, "progress", string(ui.FormatAuto), "progress on stderr: auto, plain, or json")
+	flags.StringVar(&global.progress, "progress", string(ui.FormatAuto), "progress on stderr: auto, tty, plain, or json")
 	flags.StringVar(&global.stepOutput, "step-output", string(ui.RetainOnFailure),
 		"output of finished steps: on-failure or all (on-failure shows the last 50 lines of a failed or interrupted step; output held by a process killed with SIGKILL is lost)")
 

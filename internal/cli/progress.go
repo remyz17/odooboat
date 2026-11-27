@@ -21,31 +21,46 @@ type presenter struct {
 	queue  *ui.Queue
 	format ui.Format
 	now    func() time.Time
+	raw    bool
 
 	stopTicks chan struct{}
 	ticks     sync.WaitGroup
 	closeOnce sync.Once
 }
 
-func newPresenter(stderr io.Writer, format ui.Format, retention ui.Retention, now func() time.Time) *presenter {
+// newPresenter builds the presenter of one invocation. view is used by tty
+// progress only.
+func newPresenter(stderr io.Writer, format ui.Format, retention ui.Retention, now func() time.Time, view ui.View) *presenter {
 	out := ui.NewWriter(stderr)
-	sink := ui.NewPlain(out)
-	if format == ui.FormatJSON {
-		sink = ui.NewJSON(out)
+	var sink ui.Sink
+	switch format {
+	case ui.FormatTTY:
+		// The live renderer applies retention itself: it shows output as it
+		// arrives (ADR 0011 §7).
+		sink = ui.NewTTY(out, retention, view)
+	case ui.FormatJSON:
+		sink = ui.Retain(ui.NewJSON(out), retention)
+	default:
+		sink = ui.Retain(ui.NewPlain(out), retention)
 	}
-	p := &presenter{out: out, queue: ui.NewQueue(ui.Retain(sink, retention), now), format: format, now: now,
+	p := &presenter{out: out, queue: ui.NewQueue(sink, now), format: format, now: now,
 		stopTicks: make(chan struct{})}
-	if format == ui.FormatPlain {
+	switch format {
+	case ui.FormatPlain:
 		p.ticks.Add(1)
-		go p.tick()
+		go p.tick(time.Second)
+	case ui.FormatTTY:
+		p.ticks.Add(1)
+		go p.tick(ui.TTYRefresh)
 	}
 	return p
 }
 
-// tick drives the plain heartbeat; the renderer decides when to print.
-func (p *presenter) tick() {
+// tick drives the plain heartbeat and the tty redraws; the renderer
+// decides what to print.
+func (p *presenter) tick(every time.Duration) {
 	defer p.ticks.Done()
-	ticker := time.NewTicker(time.Second)
+	ticker := time.NewTicker(every)
 	defer ticker.Stop()
 	for {
 		select {
@@ -69,13 +84,21 @@ func (p *presenter) Warn(messages []string) {
 }
 
 // SetRaw switches newline translation for a terminal in raw mode, after
-// everything reported so far is written.
+// everything reported so far is written. While raw, a session owns the
+// terminal and live progress is not drawn.
 func (p *presenter) SetRaw(raw bool) {
+	p.raw = raw
+	p.queue.Post(ui.Record{Time: p.now(), Event: ui.Settle{Hold: raw}})
 	p.queue.Flush()
 	p.out.SetRaw(raw)
 }
 
-func (p *presenter) Flush() { p.queue.Flush() }
+// Flush returns once everything reported is written and live progress is
+// erased, so stdout can be written below it.
+func (p *presenter) Flush() {
+	p.queue.Post(ui.Record{Time: p.now(), Event: ui.Settle{Hold: p.raw}})
+	p.queue.Flush()
+}
 
 // Fail writes err as the invocation's last record, then closes. usage is
 // the command's usage text, printed only by plain progress.
@@ -96,6 +119,7 @@ func (p *presenter) Close() {
 	p.closeOnce.Do(func() {
 		close(p.stopTicks)
 		p.ticks.Wait()
+		p.queue.Post(ui.Record{Time: p.now(), Event: ui.Finish{}})
 		p.queue.Close()
 	})
 }
@@ -114,7 +138,7 @@ func presenterOf(cmd *cobra.Command) *presenter {
 
 var (
 	resultFormats   = []string{config.OutputText, config.OutputYAML, config.OutputJSON}
-	progressFormats = []string{string(ui.FormatAuto), string(ui.FormatPlain), string(ui.FormatJSON)}
+	progressFormats = []string{string(ui.FormatAuto), string(ui.FormatTTY), string(ui.FormatPlain), string(ui.FormatJSON)}
 	retentionModes  = []string{string(ui.RetainOnFailure), string(ui.RetainAll)}
 )
 
@@ -162,13 +186,19 @@ func (s presentation) presenter(deps Dependencies) *presenter {
 	if !slices.Contains(retentionModes, s.stepOutput) {
 		retention = ui.RetainOnFailure
 	}
+	terminal, getenv := deps.terminal(), deps.getenv()
+	resultFormat, color := s.result(deps)
 	if format == ui.FormatAuto {
-		resultFormat, _ := s.result(deps)
-		resultJSON := resultFormat == config.OutputJSON
-		live := ui.LiveRedraw(deps.terminal().StderrIsTerminal(), deps.getenv())
-		format = ui.ResolveFormat(format, live, resultJSON)
+		live := ui.LiveRedraw(terminal.StderrIsTerminal(), getenv)
+		format = ui.ResolveFormat(format, live, resultFormat == config.OutputJSON)
+		// Live redrawing also needs the width, or wrapped lines break the
+		// cursor arithmetic; a person at that terminal still gets text.
+		if width, _ := terminal.StderrSize(); format == ui.FormatTTY && width <= 0 {
+			format = ui.FormatPlain
+		}
 	}
-	return newPresenter(deps.Stderr, format, retention, deps.now())
+	view := ui.View{Caps: ui.DetectCapabilities(terminal.StderrIsTerminal(), getenv, color, s.noColor), Size: terminal.StderrSize}
+	return newPresenter(deps.Stderr, format, retention, deps.now(), view)
 }
 
 // scanPresentation reads the presentation flags from raw arguments, for a

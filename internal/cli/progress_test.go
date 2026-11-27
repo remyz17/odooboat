@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -159,10 +160,12 @@ func TestStatusWarningsFollowProgressFormat(t *testing.T) {
 
 type ttyStderr struct {
 	noTerminal
-	tty bool
+	tty           bool
+	width, height int
 }
 
-func (t ttyStderr) StderrIsTerminal() bool { return t.tty }
+func (t ttyStderr) StderrIsTerminal() bool          { return t.tty }
+func (t ttyStderr) StderrSize() (width, height int) { return t.width, t.height }
 
 func TestAutoProgressJSONWithOutputJSON(t *testing.T) {
 	fails := func() []*cobra.Command {
@@ -319,3 +322,45 @@ func (l *lockedBuffer) Reset() {
 type writerFunc func([]byte) (int, error)
 
 func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
+
+func TestAutoProgressTTY(t *testing.T) {
+	terminal := ttyStderr{tty: true, width: 80, height: 24}
+	env := func(values map[string]string) func(string) string {
+		return func(k string) string { return values[k] }
+	}
+	xterm := env(map[string]string{"TERM": "xterm"})
+	auto := presentation{progress: "auto", stepOutput: "on-failure", userConfig: filepath.Join(t.TempDir(), "none.yaml")}
+	for _, c := range []struct {
+		name string
+		s    presentation
+		deps Dependencies
+		want ui.Format
+	}{
+		{"terminal", auto, Dependencies{Terminal: terminal, Getenv: xterm}, ui.FormatTTY},
+		{"unknown width", auto, Dependencies{Terminal: ttyStderr{tty: true}, Getenv: xterm}, ui.FormatPlain},
+		{"CI", auto, Dependencies{Terminal: terminal, Getenv: env(map[string]string{"TERM": "xterm", "CI": "1"})}, ui.FormatPlain},
+		{"json result", func() presentation { s := auto; s.output = "json"; return s }(), Dependencies{Terminal: terminal, Getenv: xterm}, ui.FormatTTY},
+	} {
+		c.deps.Stderr = io.Discard
+		p := c.s.presenter(c.deps)
+		p.Close()
+		if p.format != c.want {
+			t.Errorf("%s: format %s, want %s", c.name, p.format, c.want)
+		}
+	}
+}
+
+func TestProgressFlagAcceptsTTY(t *testing.T) {
+	ok := []*cobra.Command{emitting("ok", func(*presenter) error { return nil })}
+	if code, stderr := runCLI(t, Dependencies{}, ok, "--progress=tty", "ok"); code != ExitOK || strings.Contains(stderr, "Usage") {
+		t.Fatalf("exit %d, stderr %q", code, stderr)
+	}
+}
+
+func TestUnknownProgressListsTTY(t *testing.T) {
+	ok := []*cobra.Command{emitting("ok", func(*presenter) error { return nil })}
+	code, stderr := runCLI(t, Dependencies{}, ok, "--progress=x", "ok")
+	if code != ExitUsage || !strings.Contains(stderr, "auto, tty, plain, json") {
+		t.Fatalf("exit %d, stderr %q", code, stderr)
+	}
+}

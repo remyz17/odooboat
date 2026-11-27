@@ -15,6 +15,8 @@ type Terminal interface {
 	Resizes() (sizes <-chan app.TerminalSize, stop func())
 	// StderrIsTerminal reports whether stderr is a terminal (ADR 0011 §3).
 	StderrIsTerminal() bool
+	// StderrSize is the size of the terminal on stderr; 0 means unknown.
+	StderrSize() (width, height int)
 	// StdoutIsTerminal reports whether stdout is a terminal (ADR 0011 §3).
 	StdoutIsTerminal() bool
 }
@@ -27,4 +29,5 @@ func (noTerminal) Size() (app.TerminalSize, error)            { return app.Termi
 func (noTerminal) MakeRaw() (func() error, error)             { return func() error { return nil }, nil }
 func (noTerminal) Resizes() (<-chan app.TerminalSize, func()) { return nil, func() {} }
 func (noTerminal) StderrIsTerminal() bool                     { return false }
+func (noTerminal) StderrSize() (int, int)                     { return 0, 0 }
 func (noTerminal) StdoutIsTerminal() bool                     { return false }
