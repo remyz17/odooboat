@@ -153,16 +153,48 @@ func TestTTYFrameHeightCap(t *testing.T) {
 	if lines := s.frame(epoch.Add(secs(1)), 80, 0); len(lines) != 8 {
 		t.Fatalf("height 0:\n%s", frameText(lines))
 	}
+	for i := 7; i <= 130; i++ {
+		feed(s, timed{0, app.StepStarted{ID: fmt.Sprint(i), Kind: app.StepCreate, Subject: app.Subject{Kind: app.ResourceVolume, Name: "v"}}})
+	}
+	for _, width := range []int{3, 5, 10} {
+		for _, l := range s.frame(epoch.Add(secs(1)), width, 5) {
+			if w := ansi.StringWidth(l); w > width-1 {
+				t.Errorf("width %d: %q is %d cells", width, l, w)
+			}
+		}
+	}
+}
+
+func TestTTYStepNamesAreSanitized(t *testing.T) {
+	v := newVT(t)
+	s := ttyOn(v, RetainOnFailure)
+	name := app.Subject{Kind: app.ResourceBuildStep, Name: "[2/7] RUN <<EOF\n\tset -e\u009b2J\nEOF"}
+	feed(s,
+		timed{0, app.StepStarted{ID: "1", Kind: app.StepBuild, Subject: envImage}},
+		timed{0, app.StepStarted{ID: "2", Parent: "1", Kind: app.StepBuild, Subject: name}},
+		timed{secs(1), Tick{}},
+		timed{secs(2), app.StepFinished{ID: "2", Outcome: app.OutcomeFailed}},
+		timed{secs(2), app.StepFinished{ID: "1", Outcome: app.OutcomeFailed}},
+	)
+	for _, l := range append(s.frame(epoch, 80, 0), v.Lines()...) {
+		if strings.ContainsAny(l, "\t\n\u009b") {
+			t.Errorf("control character in %q", l)
+		}
+	}
+	if lines := v.Lines(); len(lines) != 2 {
+		t.Errorf("a name with newlines took more than its line:\n%s", v.Text())
+	}
 }
 
 func TestTTYTailSanitizes(t *testing.T) {
 	s := newTestTTY(io.Discard, true)
 	feed(s,
 		timed{0, app.StepStarted{ID: "1", Kind: app.StepCreate, Subject: odooCtr}},
-		timed{0, app.StepOutput{ID: "1", Data: []byte("\x1b[31mred\x1b[0m\tok\x1b[K\n")}},
+		timed{0, app.StepOutput{ID: "1", Data: []byte("\x1b[31mred\x1b[0m\tok\x1b[K\u009b2J\u0085\n")}},
 	)
 	lines := s.frame(epoch.Add(secs(1)), 80, 0)
-	if len(lines) != 2 || lines[1] != "  │ red ok" {
+	// The C1 introducer goes; what followed it is harmless text.
+	if len(lines) != 2 || lines[1] != "  │ red ok2J" {
 		t.Fatalf("frame:\n%q", lines)
 	}
 }
@@ -340,14 +372,24 @@ func TestTTYSettleAndHold(t *testing.T) {
 }
 
 func TestTTYUnknownStep(t *testing.T) {
+	// Output and transfers of a step never started are not drawn, as plain
+	// prints nothing for them.
 	v := newVT(t)
-	feed(ttyOn(v, RetainOnFailure),
+	s := ttyOn(v, RetainOnFailure)
+	feed(s,
 		timed{0, app.StepOutput{ID: "9", Data: []byte("x\n")}},
-		timed{0, app.Transfer{ID: "9", Current: 1}},
-		timed{secs(1), app.StepFinished{ID: "9", Outcome: app.OutcomeFailed}},
-		timed{secs(1), Finish{}},
+		timed{0, app.Transfer{ID: "8", Current: 5}},
+		timed{secs(1), Tick{}},
 	)
-	if text := v.Text(); !strings.Contains(text, "9  failed") {
+	if v.written != 0 {
+		t.Fatalf("drew an unknown step:\n%s", v.Text())
+	}
+	// Its failure is committed with the output held for it, as plain does.
+	feed(s,
+		timed{secs(1), app.StepFinished{ID: "9", Outcome: app.OutcomeFailed}},
+		timed{secs(2), Finish{}},
+	)
+	if text := v.Text(); !strings.Contains(text, "9  failed") || !strings.Contains(text, "│ x") || strings.Contains(text, "8") {
 		t.Fatalf("scrollback:\n%s", text)
 	}
 }

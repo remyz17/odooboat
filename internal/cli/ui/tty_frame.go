@@ -54,7 +54,7 @@ func (t *tty) frame(now time.Time, width, height int) []string {
 			}
 		})
 	}
-	return t.capHeight(lines, height)
+	return t.capHeight(lines, width, height)
 }
 
 type frameLine struct {
@@ -154,7 +154,7 @@ func (t *tty) stepLine(s *ttyStep, depth int, now time.Time, width int) string {
 		}
 		took = s.end.Sub(s.at)
 	}
-	return fitStep(indent+indicator+" ", stepLabel(s.started, true), detail, elapsed(took), width, t.ellipsis())
+	return fitStep(indent+indicator+" ", s.label(), sanitize(detail), elapsed(took), width, t.ellipsis())
 }
 
 func (t *tty) symbol(tone Tone) string {
@@ -274,7 +274,7 @@ func sanitize(line string) string {
 		switch {
 		case r == '\t':
 			return ' '
-		case r < 0x20 || r == 0x7f:
+		case r < 0x20 || r >= 0x7f && r <= 0x9f: // C0, DEL, and C1 controls
 			return -1
 		}
 		return r
@@ -283,7 +283,7 @@ func sanitize(line string) string {
 
 // capHeight keeps the region within height-1 lines: tail lines go first,
 // then the last steps, replaced by "… N more".
-func (t *tty) capHeight(lines []frameLine, height int) []string {
+func (t *tty) capHeight(lines []frameLine, width, height int) []string {
 	texts := func(ls []frameLine) []string {
 		out := make([]string, len(ls))
 		for i, l := range ls {
@@ -308,7 +308,11 @@ func (t *tty) capHeight(lines []frameLine, height int) []string {
 		return nil
 	}
 	shown := limit - 1
-	return append(texts(steps[:shown]), fmt.Sprintf("%s %d more", t.ellipsis(), len(steps)-shown))
+	more := fmt.Sprintf("%s %d more", t.ellipsis(), len(steps)-shown)
+	if width > 0 {
+		more = ansi.Truncate(more, width-1, "")
+	}
+	return append(texts(steps[:shown]), more)
 }
 
 // units are decimal byte units.
