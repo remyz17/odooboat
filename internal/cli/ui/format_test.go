@@ -8,12 +8,13 @@ func TestResolveFormat(t *testing.T) {
 		live, resultJSON bool
 		want             Format
 	}{
-		{FormatAuto, true, false, FormatPlain},
-		{FormatAuto, true, true, FormatPlain}, // tty until step 3
+		{FormatAuto, true, false, FormatTTY},
+		{FormatAuto, true, true, FormatTTY},
 		{FormatAuto, false, true, FormatJSON},
 		{FormatAuto, false, false, FormatPlain},
 		{FormatPlain, false, true, FormatPlain},
 		{FormatJSON, true, false, FormatJSON},
+		{FormatTTY, false, false, FormatTTY},
 	} {
 		if got := ResolveFormat(c.requested, c.live, c.resultJSON); got != c.want {
 			t.Errorf("ResolveFormat(%s, live %v, json %v) = %s, want %s", c.requested, c.live, c.resultJSON, got, c.want)

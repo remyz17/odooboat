@@ -78,7 +78,7 @@ func printed(t *testing.T, format string, value any, text textRenderer, warnings
 	t.Helper()
 	var stdout, stderr bytes.Buffer
 	g := &globalFlags{resultFormat: format, colorPreference: true,
-		present: newPresenter(&stderr, ui.FormatPlain, ui.RetainOnFailure, time.Now)}
+		present: newPresenter(&stderr, ui.FormatPlain, ui.RetainOnFailure, time.Now, ui.View{})}
 	deps := Dependencies{Stdout: &stdout, Getenv: func(string) string { return "" }}
 	if err := g.print(deps, value, text, warnings); err != nil {
 		t.Fatal(err)
@@ -135,7 +135,7 @@ func TestTextResultFollowsProgress(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 		return both.Write(p)
 	})
-	g := &globalFlags{resultFormat: "text", present: newPresenter(slow, ui.FormatPlain, ui.RetainOnFailure, time.Now)}
+	g := &globalFlags{resultFormat: "text", present: newPresenter(slow, ui.FormatPlain, ui.RetainOnFailure, time.Now, ui.View{})}
 	subject := app.Subject{Kind: app.ResourceContainer, Name: "odoo"}
 	g.present.Reporter().Report(app.StepStarted{ID: "1", Kind: app.StepCreate, Subject: subject})
 	g.present.Reporter().Report(app.StepFinished{ID: "1", Outcome: app.OutcomeDone})

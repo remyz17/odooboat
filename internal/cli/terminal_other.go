@@ -22,3 +22,7 @@ func (stderrTerminal) MakeRaw() (func() error, error)             { return func(
 func (stderrTerminal) Resizes() (<-chan app.TerminalSize, func()) { return nil, func() {} }
 func (t stderrTerminal) StderrIsTerminal() bool                   { return term.IsTerminal(int(t.stderr.Fd())) }
 func (t stderrTerminal) StdoutIsTerminal() bool                   { return term.IsTerminal(int(t.stdout.Fd())) }
+
+// StderrSize is unknown: VT sequences are not enabled on these platforms,
+// so auto keeps plain progress.
+func (stderrTerminal) StderrSize() (int, int) { return 0, 0 }
