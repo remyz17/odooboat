@@ -110,3 +110,18 @@ func (h *heldOutput) push(l heldLine) {
 	}
 	h.lines = append(h.lines, l)
 }
+
+// last returns up to n of the latest lines, the unterminated one included.
+func (h *heldOutput) last(n int) []string {
+	var out []string
+	for _, l := range h.lines {
+		out = append(out, string(l.data))
+	}
+	if h.partial != nil {
+		out = append(out, string(h.partial.data))
+	}
+	if len(out) > n {
+		out = out[len(out)-n:]
+	}
+	return out
+}
