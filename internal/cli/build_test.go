@@ -154,8 +154,10 @@ func TestEnvironmentBuildCommand(t *testing.T) {
 		built.Community.Series != "18.0" || !strings.HasPrefix(built.Image, "odooboat/environment:") || engine.builds != 1 {
 		t.Fatalf("first build = %+v (builds %d)", built, engine.builds)
 	}
-	if want := "build image " + built.Image + "\n"; !strings.HasPrefix(first.stderr, want) ||
-		!strings.Contains(first.stderr, "build image "+built.Image+": done (") {
+	// Progress shows the identity tag cut to 12 characters.
+	short := built.Image[:len("odooboat/environment:")+12]
+	if want := "build image " + short + "\n"; !strings.HasPrefix(first.stderr, want) ||
+		!strings.Contains(first.stderr, "build image "+short+": done (") {
 		t.Errorf("stderr lacks the build step:\n%s", first.stderr)
 	}
 	// A successful step's output is retained, then discarded.
