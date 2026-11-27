@@ -151,9 +151,7 @@ var (
 
 // Ref shortens the digest of an image reference, and a tag that is a full
 // hash, to 12 characters.
-func (p *Printer) Ref(ref string) string {
-	return hashTag.ReplaceAllString(digest.ReplaceAllString(ref, "@sha256:$1"), ":$1")
-}
+func (p *Printer) Ref(ref string) string { return shortRef(ref) }
 
 // Path shows paths under the home directory with ~.
 func (p *Printer) Path(path string) string {

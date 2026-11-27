@@ -41,19 +41,9 @@ func NewPlain(w io.Writer) Sink { return &plain{w: w, steps: map[string]*plainSt
 
 // hidden reports whether a step's start, success, and heartbeat are left
 // out: layers and build steps are shown only when they fail.
-func (s *plainStep) hidden() bool {
-	k := s.started.Subject.Kind
-	return k == app.ResourceLayer || k == app.ResourceBuildStep
-}
+func (s *plainStep) hidden() bool { return hiddenKind(s.started.Subject.Kind) }
 
-func (s *plainStep) label(withRole bool) string {
-	sub := s.started.Subject
-	label := fmt.Sprintf("%s %s %s", s.started.Kind, sub.Kind, sub.Name)
-	if withRole && sub.Role != "" {
-		label += " (" + string(sub.Role) + ")"
-	}
-	return label
-}
+func (s *plainStep) label(withRole bool) string { return stepLabel(s.started, withRole) }
 
 func (p *plain) Handle(r Record) {
 	switch e := r.Event.(type) {
@@ -98,26 +88,9 @@ func (p *plain) Handle(r Record) {
 			}
 		}
 		p.compact()
-	case app.LockWaiting:
-		if e.Holder == nil {
-			fmt.Fprintln(p.w, "waiting for the environment lock held by an unknown process")
-			return
-		}
-		fmt.Fprintf(p.w, "waiting for the environment lock held by %q (pid %d on %s since %s)\n",
-			e.Holder.Operation, e.Holder.PID, e.Holder.Host, e.Holder.StartedAt.In(zone).Format(time.TimeOnly))
-	case app.DatabaseSelected:
-		fmt.Fprintf(p.w, "using database %q\n", e.Name)
-	case app.SessionDegraded:
-		fmt.Fprintf(p.w, "warning: %s failed: %v\n", e.Operation, e.Err)
-	case Warning:
-		fmt.Fprintf(p.w, "warning: %s\n", e.Message)
-	case ErrorReport:
-		if e.Usage != "" {
-			fmt.Fprint(p.w, e.Usage)
-		}
-		fmt.Fprintf(p.w, "error: %s\n", e.Message)
-		if e.Hint != "" {
-			fmt.Fprintf(p.w, "hint: %s\n", e.Hint)
+	default:
+		if text, ok := messageText(r.Event); ok {
+			fmt.Fprint(p.w, text)
 		}
 	}
 }
